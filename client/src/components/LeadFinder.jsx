@@ -1,0 +1,1064 @@
+import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
+import { 
+  Search, 
+  MapPin, 
+  Building2, 
+  Star, 
+  Globe, 
+  Phone, 
+  Smartphone, 
+  PhoneForwarded, 
+  ExternalLink, 
+  PlusCircle, 
+  CheckCircle2, 
+  AlertCircle,
+  Sparkles,
+  Filter,
+  CheckSquare,
+  Square,
+  ArrowRight,
+  Layers,
+  Zap,
+  Navigation,
+  Eye,
+  FileSpreadsheet,
+  ClipboardList,
+  Upload
+} from 'lucide-react';
+import InstagramIcon from './InstagramIcon';
+import { searchPlaces, importLeads } from '../api';
+
+const POPULAR_LOCATIONS = [
+  { district: 'Atakum', city: 'Samsun', label: 'Samsun Atakum' },
+  { district: 'Kadıköy', city: 'İstanbul', label: 'Kadıköy' },
+  { district: 'Beşiktaş', city: 'İstanbul', label: 'Beşiktaş' },
+  { district: 'Şişli', city: 'İstanbul', label: 'Şişli' },
+  { district: 'Çankaya', city: 'Ankara', label: 'Çankaya' },
+  { district: 'Nilüfer', city: 'Bursa', label: 'Nilüfer' },
+  { district: 'Karşıyaka', city: 'İzmir', label: 'Karşıyaka' },
+  { district: 'Muratpaşa', city: 'Antalya', label: 'Muratpaşa' }
+];
+
+const POPULAR_CATEGORIES = [
+  { id: 'cafe', label: 'Cafe & Kahve', icon: '☕' },
+  { id: 'restaurant', label: 'Restoran & Lokanta', icon: '🍽️' },
+  { id: 'giyim', label: 'Giyim & Butik', icon: '👗' },
+  { id: 'kuafor', label: 'Kuaför & Güzellik', icon: '✂️' },
+  { id: 'saglik', label: 'Diş Kliniği & Sağlık', icon: '🦷' },
+  { id: 'otel', label: 'Butik Otel & Konaklama', icon: '🏨' },
+  { id: 'mimarlik', label: 'Mimarlık & İç Tasarım', icon: '📐' },
+  { id: 'diyetisyen', label: 'Diyetisyen & Yaşam', icon: '🥗' }
+];
+
+export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings }) {
+  const [inputMode, setInputMode] = useState('maps'); // 'maps' | 'excel' | 'paste'
+  const [district, setDistrict] = useState('Atakum');
+  const [city, setCity] = useState('Samsun');
+  const [category, setCategory] = useState('cafe');
+  const [customQuery, setCustomQuery] = useState('');
+  const [deepSearch, setDeepSearch] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState([]);
+  const [isDemoData, setIsDemoData] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [importing, setImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState(null);
+  const [filterNoWebsite, setFilterNoWebsite] = useState(false);
+  const [filterMobileOnly, setFilterMobileOnly] = useState(false);
+
+  // Manuel Yapıştır & Excel State
+  const [pasteText, setPasteText] = useState('');
+  const [fileHint, setFileHint] = useState('');
+
+  // Konum Önizleme Modalı
+  const [mapModalPlace, setMapModalPlace] = useState(null);
+
+  const handleSearch = async (e) => {
+    if (e) e.preventDefault();
+    setLoading(true);
+    setImportStatus(null);
+    setSelectedIds(new Set());
+
+    try {
+      const res = await searchPlaces({
+        district,
+        city,
+        category,
+        query: customQuery,
+        deepSearch: deepSearch
+      });
+
+      const list = res.data || [];
+      setResults(list);
+      setIsDemoData(res.isDemo || false);
+      setSelectedIds(new Set(list.map(item => item.place_id)));
+    } catch (err) {
+      alert(`Arama sırasında hata: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Excel / CSV Dosya Yükleme (Örnek projedeki XLSX entegrasyonu)
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setFileHint(`Okunuyor: ${file.name}...`);
+    const reader = new FileReader();
+
+    reader.onload = (evt) => {
+      try {
+        let rows = [];
+        if (/\.csv$/i.test(file.name)) {
+          let text = evt.target.result;
+          if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          rows = lines.map(line => {
+            const delim = line.includes(';') ? ';' : ',';
+            return line.split(delim).map(c => c.trim().replace(/^"|"$/g, ''));
+          });
+        } else {
+          const data = new Uint8Array(evt.target.result);
+          const wb = XLSX.read(data, { type: 'array' });
+          const firstSheet = wb.Sheets[wb.SheetNames[0]];
+          rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: false, defval: '' });
+        }
+
+        rows = rows.filter(r => r.some(c => String(c).trim() !== ''));
+        if (rows.length === 0) {
+          setFileHint('Dosyada okunabilir satır bulunamadı.');
+          return;
+        }
+
+        // Başlık satırı kontrolü
+        const headerWords = ['ad', 'isim', 'işletme', 'name', 'adres', 'address', 'telefon', 'tel', 'phone'];
+        const firstRow = rows[0].map(c => String(c).toLowerCase().trim());
+        const hasHeader = firstRow.some(c => headerWords.some(w => c.includes(w)));
+        if (hasHeader) rows = rows.slice(1);
+
+        const mapped = rows.map((r, idx) => {
+          const name = String(r[0] || '').trim();
+          const address = String(r[1] || '').trim();
+          const phone = String(r[2] || '').trim();
+          const pId = `excel_${Date.now()}_${idx}`;
+          return {
+            place_id: pId,
+            name: name || `İşletme #${idx + 1}`,
+            address: address || `${district} / ${city}`,
+            phone: phone,
+            raw_phone: phone,
+            district: district,
+            city: city,
+            category: category,
+            rating: 5.0,
+            has_website: 0,
+            website: '',
+            has_instagram: 0,
+            instagram: '',
+            maps_url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + ' ' + district)}`,
+            is_mobile: /^0?5\d{9}$/.test(phone.replace(/\D/g, '')) ? 1 : 0
+          };
+        }).filter(r => r.name);
+
+        setResults(mapped);
+        setSelectedIds(new Set(mapped.map(m => m.place_id)));
+        setFileHint(`✓ ${file.name} başarıyla okundu: ${mapped.length} işletme bulundu.`);
+      } catch (err) {
+        console.error(err);
+        setFileHint('Dosya okunamadı. Lütfen .xlsx, .xls veya .csv yükleyin.');
+      }
+    };
+
+    if (/\.csv$/i.test(file.name)) {
+      reader.readAsText(file, 'UTF-8');
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
+  };
+
+  // Metin Yapıştırarak İçe Aktarma
+  const handlePasteImport = (e) => {
+    e.preventDefault();
+    if (!pasteText.trim()) {
+      alert('Lütfen yapıştırılacak satırları girin.');
+      return;
+    }
+
+    const lines = pasteText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const mapped = lines.map((line, idx) => {
+      const parts = line.includes(';') ? line.split(';') : (line.includes('\t') ? line.split('\t') : line.split(','));
+      const name = (parts[0] || '').trim();
+      const address = (parts[1] || '').trim();
+      const phone = (parts[2] || '').trim();
+      const pId = `paste_${Date.now()}_${idx}`;
+
+      return {
+        place_id: pId,
+        name: name || `İşletme #${idx + 1}`,
+        address: address || `${district} / ${city}`,
+        phone: phone,
+        raw_phone: phone,
+        district: district,
+        city: city,
+        category: category,
+        rating: 5.0,
+        has_website: 0,
+        website: '',
+        has_instagram: 0,
+        instagram: '',
+        maps_url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + ' ' + district)}`,
+        is_mobile: /^0?5\d{9}$/.test(phone.replace(/\D/g, '')) ? 1 : 0
+      };
+    }).filter(r => r.name);
+
+    if (mapped.length === 0) {
+      alert('Hiçbir geçerli işletme satırı ayrıştırılamadı.');
+      return;
+    }
+
+    setResults(mapped);
+    setSelectedIds(new Set(mapped.map(m => m.place_id)));
+    setPasteText('');
+    setFileHint(`✓ Yapıştırılan metinden ${mapped.length} işletme listelendi.`);
+  };
+
+  const setLocation = (loc) => {
+    setDistrict(loc.district);
+    setCity(loc.city);
+  };
+
+  const toggleSelect = (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredResults.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredResults.map(i => i.place_id)));
+    }
+  };
+
+  const handleImport = async () => {
+    const toImport = results.filter(r => selectedIds.has(r.place_id));
+    if (toImport.length === 0) {
+      alert('Lütfen eklenecek en az bir işletme seçiniz.');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const res = await importLeads(toImport);
+      setImportStatus({
+        success: true,
+        message: `✓ ${res.count} işletme başarıyla 'Arama Listesi'ne aktarıldı!`
+      });
+      if (onImportComplete) onImportComplete();
+    } catch (err) {
+      let friendlyError = err.response?.data?.error || err.message;
+      if (err.response?.status === 413) {
+        friendlyError = 'Seçilen işletme listesi veri boyut sınırını aştı (413 Payload Too Large). Sunucu sınırı 50MB\'a yükseltildi, lütfen tekrar deneyiniz.';
+      } else if (friendlyError.includes('413')) {
+        friendlyError = 'Seçilen kayıt boyutu çok büyük. Lütfen işletmeleri daha küçük gruplar halinde içe aktarın.';
+      }
+      setImportStatus({
+        success: false,
+        message: `İçe aktarma hatası: ${friendlyError}`
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+
+  // Filtrelenmiş sonuçlar
+  const filteredResults = results.filter(item => {
+    if (filterNoWebsite && item.has_website) return false;
+    if (filterMobileOnly && !item.is_mobile) return false;
+    return true;
+  });
+
+
+  return (
+    <div className="space-y-6">
+      
+      {/* Üst Bilgi Kartı */}
+      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-800 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+        <div className="relative z-10 max-w-3xl">
+          <span className="bg-white/20 text-blue-100 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider mb-3 inline-block">
+            Adım 1-4: Kapsamlı Bölge Taraması, Doğrulanmış Linkler & Konum
+          </span>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight mb-2">
+            Google Maps İşletme Radarı
+          </h1>
+          <p className="text-blue-100/90 text-sm leading-relaxed">
+            Belirlediğiniz ilçe ve kategorideki tüm işletmeleri tarayın. <strong>Doğrulanmış web siteleri</strong>, hatasız <strong>Instagram profilleri</strong>, <strong>harita konumları ve yol tarifleri</strong> ile eksiksiz listeleyin.
+          </p>
+        </div>
+
+        {!hasApiKey && (
+          <div className="mt-4 bg-amber-500/20 border border-amber-400/40 rounded-xl p-3.5 flex items-center justify-between text-amber-100 text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-300 shrink-0" />
+              <span>
+                Henüz Google Maps API anahtarı kaydedilmedi. Şu anda <strong>Akıllı Simülatör (Demo)</strong> modu aktiftir. Gerçek harita verisi için anahtarınızı ekleyebilirsiniz.
+              </span>
+            </div>
+            <button
+              onClick={onOpenSettings}
+              className="ml-3 px-3 py-1.5 bg-white text-slate-900 font-bold rounded-lg hover:bg-amber-100 transition-all text-xs shrink-0"
+            >
+              API Key Gir
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Giriş Modu Seçimi: Google Maps | Excel/CSV | Metin Yapıştır (Örnek Proje Özelliği) */}
+      <div className="flex bg-slate-200/80 p-1 rounded-2xl max-w-md">
+        <button
+          type="button"
+          onClick={() => setInputMode('maps')}
+          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            inputMode === 'maps'
+              ? 'bg-white text-blue-600 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <MapPin className="w-3.5 h-3.5" />
+          <span>Google Haritalar</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setInputMode('excel')}
+          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            inputMode === 'excel'
+              ? 'bg-white text-emerald-600 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5" />
+          <span>Excel / CSV</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setInputMode('paste')}
+          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            inputMode === 'paste'
+              ? 'bg-white text-purple-600 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <ClipboardList className="w-3.5 h-3.5" />
+          <span>Metin Yapıştır</span>
+        </button>
+      </div>
+
+      {/* 1. MOD: GOOGLE MAPS TARAMA FORMU */}
+      {inputMode === 'maps' && (
+      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
+        <form onSubmit={handleSearch} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            
+            {/* 1. İlçe Seçimi */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                1. İlçe & Şehir
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={district}
+                  onChange={(e) => setDistrict(e.target.value)}
+                  placeholder="Örn: Atakum"
+                  required
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition-all"
+                />
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Şehir"
+                  className="w-28 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition-all"
+                />
+              </div>
+              {/* Hızlı Lokasyon Butonları */}
+              <div className="flex flex-wrap gap-1 mt-2">
+                {POPULAR_LOCATIONS.map(loc => (
+                  <button
+                    key={loc.label}
+                    type="button"
+                    onClick={() => setLocation(loc)}
+                    className={`text-[11px] px-2 py-0.5 rounded-md font-medium transition-all ${
+                      district === loc.district && city === loc.city
+                        ? 'bg-blue-600 text-white shadow-2xs' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {loc.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. İşletme Türü (Kategori) */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                2. İşletme Türü (Sektör)
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition-all"
+              >
+                {POPULAR_CATEGORIES.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.icon} {c.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {POPULAR_CATEGORIES.slice(0, 4).map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCategory(c.id)}
+                    className={`text-[11px] px-2 py-0.5 rounded-md font-medium transition-all ${
+                      category === c.id 
+                        ? 'bg-indigo-600 text-white shadow-2xs' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {c.label.split('&')[0]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Özel Arama & Derin Tarama Seçeneği */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <Search className="w-3.5 h-3.5 text-slate-500" />
+                Özel Arama Terimi (Opsiyonel)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customQuery}
+                  onChange={(e) => setCustomQuery(e.target.value)}
+                  placeholder="Örn: 3. Nesil Kahveci"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition-all"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={deepSearch}
+                  onChange={(e) => setDeepSearch(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded-sm border-slate-300 focus:ring-blue-500 cursor-pointer"
+                />
+                <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  Kapsamlı Derin Tarama (20 sınırı yok, tüm sayfaları ve varyasyonları tara)
+                </span>
+              </label>
+            </div>
+
+          </div>
+
+          {/* Tarama Butonu */}
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+            <span className="text-xs text-slate-500 hidden sm:block">
+              {deepSearch 
+                ? `⚡ ${district} / ${city} bölgesinde ${category} kategorisindeki tüm işletmeler taranacak.`
+                : `Hızlı tarama modu (İlk 20 işletme).`}
+            </span>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-md shadow-blue-200 flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Bölgedeki Tüm İşletmeler Taranıyor...</span>
+                </>
+              ) : (
+                <>
+                  <Search className="w-4 h-4" />
+                  <span>3. Bölgedeki Tüm İşletmeleri Listele</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+      )}
+
+      {/* 2. MOD: EXCEL / CSV DOSYASI YÜKLEME (Örnek Proje Özelliği) */}
+      {inputMode === 'excel' && (
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                Hedef İlçe & Şehir
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={district}
+                  onChange={(e) => setDistrict(e.target.value)}
+                  placeholder="Örn: Atakum"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800"
+                />
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Şehir"
+                  className="w-28 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-800"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                Sektör & Hizmet Kategorisi
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800"
+              >
+                {POPULAR_CATEGORIES.map(c => (
+                  <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center bg-slate-50/50 hover:bg-slate-50 transition-colors">
+            <Upload className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
+            <h3 className="font-bold text-slate-800 text-sm mb-1">
+              Excel (.xlsx, .xls) veya .csv Dosyası Seçin
+            </h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mb-4">
+              Sütun Sıralaması: <strong>İşletme Adı</strong>, <strong>Adres</strong>, <strong>Telefon</strong>. İlk satır başlık olsa dahi sistem otomatik tanır.
+            </p>
+            <label className="inline-block bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl cursor-pointer shadow-xs transition-all">
+              <span>Dosya Seç ve Ayrıştır</span>
+              <input
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+            {fileHint && (
+              <div className="mt-3 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 inline-block">
+                {fileHint}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 3. MOD: METİN YAPIŞTIRMA FORMU (Örnek Projedeki Elle Giriş) */}
+      {inputMode === 'paste' && (
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                Hedef İlçe & Şehir
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={district}
+                  onChange={(e) => setDistrict(e.target.value)}
+                  placeholder="Örn: Atakum"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800"
+                />
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Şehir"
+                  className="w-28 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-800"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                Sektör & Hizmet Kategorisi
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800"
+              >
+                {POPULAR_CATEGORIES.map(c => (
+                  <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <form onSubmit={handlePasteImport} className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Her Satıra Bir İşletme Girin (Ayırıcı: ; veya virgül veya Tab):
+              </label>
+              <textarea
+                rows={6}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder={"Örnek format:\nSoul Coffee Atakum; Cağaloğlu Cad. No:12; 0532 111 22 33\nMarinet Kafe; Lozan Cad. No:44; 0362 444 55 66"}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-purple-500 font-medium"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                Format: <code>İşletme Adı; Adres; Telefon</code>
+              </span>
+              <button
+                type="submit"
+                className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                Metni Ayrıştır ve Listele
+              </button>
+            </div>
+          </form>
+          {fileHint && (
+            <div className="text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-xl p-2.5 inline-block">
+              {fileHint}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Arama Sonuçları & Liste Kontrolü (Adım 3 & 4) */}
+      {results.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+
+          
+          {/* Sonuç Başlığı & Aksiyon Barı */}
+          <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className="font-extrabold text-lg text-slate-900">
+                  Bulunan İşletmeler ({filteredResults.length})
+                </h2>
+                <span className="bg-blue-100 text-blue-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-blue-200 flex items-center gap-1">
+                  <Zap className="w-3 h-3 text-blue-600" />
+                  {results.length} İşletme Tespit Edildi
+                </span>
+                {isDemoData && (
+                  <span className="bg-amber-100 text-amber-800 text-[11px] font-bold px-2 py-0.5 rounded-full border border-amber-200">
+                    Simülasyon Verisi
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {district} / {city} bölgesinde {category} kategorisinde tespit edilen tüm işletmeler
+              </p>
+            </div>
+
+            {/* Hızlı Filtreler & Aktarma Butonları */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFilterNoWebsite(!filterNoWebsite)}
+                className={`text-xs px-3 py-1.5 rounded-lg font-semibold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  filterNoWebsite 
+                    ? 'bg-purple-50 text-purple-700 border-purple-300' 
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                Web Sitesi Olmayanlar ({results.filter(r => !r.has_website).length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFilterMobileOnly(!filterMobileOnly)}
+                className={`text-xs px-3 py-1.5 rounded-lg font-semibold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  filterMobileOnly 
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300' 
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                Sadece Cep (GSM) ({results.filter(r => r.is_mobile).length})
+              </button>
+
+              <button
+                type="button"
+                onClick={handleImport}
+                disabled={importing || selectedIds.size === 0}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {importing ? (
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <PlusCircle className="w-4 h-4" />
+                )}
+                <span>Seçilenleri Arama Listesine Aktar ({selectedIds.size})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Başarı / Bilgi Uyarısı */}
+          {importStatus && (
+            <div className={`p-3.5 text-xs font-bold flex items-center justify-between ${
+              importStatus.success ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200' : 'bg-red-50 text-red-800 border-b border-red-200'
+            }`}>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{importStatus.message}</span>
+              </div>
+              <span className="text-[11px] underline cursor-pointer" onClick={() => setImportStatus(null)}>
+                Kapat
+              </span>
+            </div>
+          )}
+
+          {/* İşletme Tablosu */}
+          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-100/90 text-slate-600 uppercase font-bold border-b border-slate-200 tracking-wider sticky top-0 z-10 backdrop-blur-xs">
+                <tr>
+                  <th className="p-3.5 w-10 text-center">
+                    <button
+                      type="button"
+                      onClick={toggleSelectAll}
+                      className="text-slate-500 hover:text-slate-800 cursor-pointer"
+                    >
+                      {selectedIds.size === filteredResults.length && filteredResults.length > 0 ? (
+                        <CheckSquare className="w-4 h-4 text-blue-600" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="p-3.5 min-w-[220px]">İşletme Adı & Konum Detayı</th>
+                  <th className="p-3.5 min-w-[120px]">Puan & Yorum</th>
+                  <th className="p-3.5 min-w-[150px]">Telefon Durumu (GSM / Sabit)</th>
+                  <th className="p-3.5 min-w-[240px]">Web Sitesi & Instagram Durumu</th>
+                  <th className="p-3.5 text-right min-w-[130px]">Harita & Yol Tarifi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/70 font-medium">
+                {filteredResults.map((item) => {
+                  const isSelected = selectedIds.has(item.place_id);
+
+                  return (
+                    <tr 
+                      key={item.place_id} 
+                      className={`hover:bg-blue-50/40 transition-colors ${
+                        isSelected ? 'bg-blue-50/20' : ''
+                      }`}
+                    >
+                      <td className="p-3.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(item.place_id)}
+                          className="w-4 h-4 text-blue-600 rounded-sm border-slate-300 focus:ring-blue-500 cursor-pointer"
+                        />
+                      </td>
+
+                      {/* İşletme Adı & Konum Bilgisi */}
+                      <td className="p-3.5">
+                        <div className="font-extrabold text-slate-900 text-sm">
+                          {item.name}
+                        </div>
+                        <div className="text-slate-600 text-[11px] mt-0.5 flex items-start gap-1">
+                          <MapPin className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
+                          <span className="line-clamp-2">{item.address || `${item.district} / ${item.city}`}</span>
+                        </div>
+                        {item.lat && item.lng && (
+                          <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
+                            <span>📍 {Number(item.lat).toFixed(4)}, {Number(item.lng).toFixed(4)}</span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Yıldız Durumu */}
+                      <td className="p-3.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex items-center gap-1 bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-md border border-amber-200">
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                            {item.rating || 'Puan Yok'}
+                          </span>
+                          <span className="text-slate-400 text-[11px]">
+                            ({item.user_ratings_total || 0})
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Telefon & GSM/Sabit Kontrolü */}
+                      <td className="p-3.5">
+                        {item.phone && item.phone !== 'Numara Yok' ? (
+                          <div className="space-y-1">
+                            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                              {item.phone}
+                            </div>
+                            <div>
+                              {item.is_mobile ? (
+                                <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                                  <Smartphone className="w-3 h-3" />
+                                  Cep (GSM)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                                  <Phone className="w-3 h-3" />
+                                  Sabit Hat
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 italic">Telefon Bulunamadı</span>
+                        )}
+                      </td>
+
+                      {/* Doğrulanmış Web Sitesi & Instagram Durumu */}
+                      <td className="p-3.5">
+                        <div className="flex flex-col gap-1.5">
+                          
+                          {/* Web Sitesi Linki (Doğrulanmış ve Protokollü) */}
+                          {item.has_website && item.website ? (
+                            <a
+                              href={item.website}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-blue-700 hover:text-blue-900 font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200/80 transition-all max-w-[210px] truncate"
+                              title={item.website}
+                            >
+                              <Globe className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                              <span className="truncate">{item.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}</span>
+                              <ExternalLink className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/70 font-semibold text-[11px] w-fit">
+                              <Globe className="w-3 h-3 text-amber-500" />
+                              Web Yok (Fırsat!)
+                            </span>
+                          )}
+
+                          {/* Instagram: Gerçek Link veya Hatasız Arama Butonu */}
+                          {item.has_instagram && item.instagram ? (
+                            <a
+                              href={item.instagram}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-pink-700 hover:text-pink-900 font-bold bg-pink-50 hover:bg-pink-100 px-2.5 py-1 rounded-lg border border-pink-200 transition-all w-fit"
+                              title="Instagram Profilini Aç"
+                            >
+                              <InstagramIcon className="w-3.5 h-3.5 text-pink-600 shrink-0" />
+                              <span>{item.instagram_username || 'Instagram'}</span>
+                              <ExternalLink className="w-2.5 h-2.5 text-pink-400 shrink-0" />
+                            </a>
+                          ) : (
+                            <a
+                              href={item.instagram_search_url || `https://www.google.com/search?q=site:instagram.com+"${encodeURIComponent(item.name + ' ' + item.district)}"`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-slate-600 hover:text-pink-700 bg-slate-100 hover:bg-pink-50 px-2 py-0.5 rounded-md border border-slate-200 transition-all text-[11px] w-fit"
+                              title="Google ve Instagram'da bu işletmenin resmi hesabını tara"
+                            >
+                              <InstagramIcon className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span>Instagram'da Ara 🔍</span>
+                            </a>
+                          )}
+
+                        </div>
+                      </td>
+
+                      {/* Konum / Harita / Yol Tarifi Butonları */}
+                      <td className="p-3.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          
+                          {/* Mini Harita Önizleme */}
+                          <button
+                            type="button"
+                            onClick={() => setMapModalPlace(item)}
+                            className="bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 font-bold text-[11px] px-2 py-1.5 rounded-lg border border-slate-200 transition-all flex items-center gap-1 cursor-pointer"
+                            title="Konum Haritasını Önizle"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="hidden sm:inline">Konum</span>
+                          </button>
+
+                          {/* Google Maps'te Aç */}
+                          {item.maps_url && (
+                            <a
+                              href={item.maps_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] px-2 py-1.5 rounded-lg border border-blue-200 transition-all flex items-center gap-1"
+                              title="Google Haritalar'da Aç"
+                            >
+                              <MapPin className="w-3.5 h-3.5 text-red-500" />
+                              <span>Harita</span>
+                            </a>
+                          )}
+
+                          {/* Yol Tarifi */}
+                          {item.directions_url && (
+                            <a
+                              href={item.directions_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[11px] p-1.5 rounded-lg border border-emerald-200 transition-all"
+                              title="Google Maps Yol Tarifi Al"
+                            >
+                              <Navigation className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+
+                        </div>
+                      </td>
+
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Alt Özet & Seçilenleri Aktar */}
+          <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+            <span className="text-xs text-slate-500 font-medium">
+              Toplam <strong>{results.length}</strong> işletmeden <strong>{selectedIds.size}</strong> tanesi seçili
+            </span>
+            <button
+              type="button"
+              onClick={handleImport}
+              disabled={importing || selectedIds.size === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>Aday Listesine Kaydet ve Aramaya Başla</span>
+            </button>
+          </div>
+
+        </div>
+      )}
+
+      {/* KONUM VE HARİTA ÖNİZLEME MODALI */}
+      {mapModalPlace && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 animate-scale-up">
+            
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-red-500" />
+                  İşletme Konum Önizlemesi
+                </span>
+                <h3 className="font-extrabold text-lg text-slate-900 mt-0.5">
+                  {mapModalPlace.name}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {mapModalPlace.address || `${mapModalPlace.district} / ${mapModalPlace.city}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setMapModalPlace(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Harita Görüntüsü */}
+            <div className="mt-4 rounded-2xl overflow-hidden border border-slate-200 h-80 bg-slate-100 relative shadow-inner">
+              {mapModalPlace.lat && mapModalPlace.lng ? (
+                <iframe
+                  title="Konum Haritası"
+                  width="100%"
+                  height="100%"
+                  frameBorder="0"
+                  scrolling="no"
+                  marginHeight="0"
+                  marginWidth="0"
+                  src={`https://maps.google.com/maps?q=${mapModalPlace.lat},${mapModalPlace.lng}&hl=tr&z=16&output=embed`}
+                  className="w-full h-full"
+                />
+              ) : (
+                <iframe
+                  title="Arama Haritası"
+                  width="100%"
+                  height="100%"
+                  frameBorder="0"
+                  scrolling="no"
+                  marginHeight="0"
+                  marginWidth="0"
+                  src={`https://maps.google.com/maps?q=${encodeURIComponent(mapModalPlace.name + ' ' + mapModalPlace.district)}&hl=tr&z=15&output=embed`}
+                  className="w-full h-full"
+                />
+              )}
+            </div>
+
+            {/* Koordinat ve Hızlı Butonlar */}
+            <div className="mt-4 pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs text-slate-600 font-mono">
+                {mapModalPlace.lat && mapModalPlace.lng ? (
+                  <span>Enlem/Boylam: <strong>{mapModalPlace.lat}, {mapModalPlace.lng}</strong></span>
+                ) : (
+                  <span>Adres: {mapModalPlace.address}</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <a
+                  href={mapModalPlace.maps_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-xs"
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Google Haritalarda Aç</span>
+                </a>
+                
+                {mapModalPlace.directions_url && (
+                  <a
+                    href={mapModalPlace.directions_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>Yol Tarifi</span>
+                  </a>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
