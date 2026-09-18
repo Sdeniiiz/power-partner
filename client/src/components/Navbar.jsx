@@ -130,23 +130,23 @@ export default function Navbar({
           {/* Sağ Alan: Aktif Kullanıcı & Ayarlar */}
           <div className="flex items-center gap-2.5">
             {/* Giriş Yapan Hesap Bilgisi */}
-            <div className="flex items-center gap-2 bg-slate-100/90 border border-slate-200/80 rounded-xl px-2.5 py-1.5 shadow-2xs">
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold ${
+            <div className="flex items-center gap-2 bg-slate-100/90 border border-slate-200/80 rounded-xl px-2 sm:px-2.5 py-1.5 shadow-2xs">
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0 ${
                 isAdmin ? 'bg-gradient-to-tr from-rose-500 to-amber-500 shadow-rose-200 shadow-xs' : 'bg-gradient-to-tr from-blue-600 to-indigo-600'
               }`}>
                 {isAdmin ? <Shield className="w-4 h-4" /> : <User className="w-4 h-4" />}
               </div>
               <div className="flex flex-col text-left">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-black text-slate-800 tracking-tight leading-none">
+                <div className="flex items-center gap-1 sm:gap-1.5">
+                  <span className="text-xs font-black text-slate-800 tracking-tight leading-none max-w-[65px] sm:max-w-[120px] md:max-w-none truncate">
                     {authUser?.name || 'Kullanıcı'}
                   </span>
-                  <span className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded-md tracking-wider leading-none ${
+                  <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md tracking-wider leading-none hidden xs:inline-block ${
                     isAdmin 
                       ? 'bg-rose-500 text-white' 
-                      : 'bg-blue-600 text-white'
+                      : 'bg-indigo-600 text-white'
                   }`}>
-                    {isAdmin ? 'YÖNETİCİ' : 'PERSONEL'}
+                    {isAdmin ? 'YÖNETİCİ' : (authUser?.role || 'PERSONEL')}
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-400 font-mono mt-0.5 leading-none">
@@ -154,27 +154,6 @@ export default function Navbar({
                 </span>
               </div>
             </div>
-
-            {/* Personel Görev Seçici (Hangi personel adına işlem yapılıyor) */}
-            {isAdmin && (
-              <div className="hidden lg:flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
-                <span className="text-[11px] text-slate-400 font-medium">Görünüm:</span>
-                <select
-                  value={currentUser?.id || ''}
-                  onChange={(e) => {
-                    const selected = teamMembers.find(m => m.id === Number(e.target.value));
-                    if (selected) setCurrentUser(selected);
-                  }}
-                  className="bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden cursor-pointer"
-                >
-                  {teamMembers.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} ({m.role.split('&')[0].trim()})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
 
             {/* Ayarlar Butonu (Admin için tam erişim, personel için de gerekirse görüntülenebilir) */}
             {isAdmin && (

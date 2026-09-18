@@ -20,7 +20,8 @@ import {
   Edit3,
   UserPlus,
   Shield,
-  RefreshCw
+  RefreshCw,
+  Lock
 } from 'lucide-react';
 import { 
   getSettings, 
@@ -35,6 +36,7 @@ import {
   deleteCampaign,
   getUsers,
   createUser,
+  updateUserPassword,
   deleteUser,
   deleteTeamMember,
   clearCallQueue,
@@ -55,10 +57,17 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newUserName, setNewUserName] = useState('');
-  const [newUserRole, setNewUserRole] = useState('member');
+  const [newUserRole, setNewUserRole] = useState('Soğuk Arama');
   const [userActionMsg, setUserActionMsg] = useState('');
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [cleanMsg, setCleanMsg] = useState('');
+
+  // Şifre Değiştirme State
+  const [adminNewPassword, setAdminNewPassword] = useState('');
+  const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
+  const [passwordChangeMsg, setPasswordChangeMsg] = useState('');
+  const [customPasswordUser, setCustomPasswordUser] = useState(null);
+  const [customUserPassword, setCustomUserPassword] = useState('');
 
   // Kampanya Yönetimi State (Örnekteki Campaign Manager)
   const [campaigns, setCampaigns] = useState([]);
@@ -161,6 +170,63 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       setTimeout(() => setUserActionMsg(''), 3000);
     } catch (err) {
       alert(`Silme hatası: ${err.response?.data?.error || err.message}`);
+    }
+  };
+
+  const handleChangeMyPassword = async (e) => {
+    e.preventDefault();
+    if (!adminNewPassword.trim()) {
+      alert('Lütfen yeni bir şifre girin.');
+      return;
+    }
+    if (!authUser?.id) {
+      alert('Kullanıcı oturumu bulunamadı.');
+      return;
+    }
+    setPasswordChangeLoading(true);
+    try {
+      const res = await updateUserPassword(authUser.id, adminNewPassword.trim());
+      setPasswordChangeMsg(`✓ ${res.message || 'Şifreniz başarıyla güncellendi.'}`);
+      setAdminNewPassword('');
+      setTimeout(() => setPasswordChangeMsg(''), 4000);
+    } catch (err) {
+      alert(`Şifre güncelleme hatası: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setPasswordChangeLoading(false);
+    }
+  };
+
+  const handleUpdateCustomUserPassword = async (e) => {
+    e.preventDefault();
+    if (!customPasswordUser || !customUserPassword.trim()) return;
+    try {
+      const res = await updateUserPassword(customPasswordUser.id, customUserPassword.trim());
+      setUserActionMsg(`✓ ${res.message || 'Kullanıcı şifresi güncellendi'}`);
+      setCustomPasswordUser(null);
+      setCustomUserPassword('');
+      setTimeout(() => setUserActionMsg(''), 3000);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
+    }
+  };
+
+  const getRoleBadge = (role) => {
+    switch (role) {
+      case 'admin':
+      case 'Yönetici (Admin)':
+        return { label: 'Yönetici (Admin)', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200' };
+      case 'Soğuk Arama':
+        return { label: 'Soğuk Arama', badgeClass: 'bg-sky-100 text-sky-800 border-sky-200' };
+      case 'Saha Satış':
+        return { label: 'Saha Satış', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+      case 'Yazılım':
+        return { label: 'Yazılım', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200' };
+      case 'Baskı / İmalat':
+        return { label: 'Baskı / İmalat', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' };
+      case 'Dijital Ürünler':
+        return { label: 'Dijital Ürünler', badgeClass: 'bg-teal-100 text-teal-800 border-teal-200' };
+      default:
+        return { label: role || 'Personel', badgeClass: 'bg-blue-100 text-blue-700 border-blue-200' };
     }
   };
 
@@ -335,16 +401,16 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
 
   const handleAddMember = async (e) => {
     e.preventDefault();
-    if (!newMemberName) return;
+    if (!newMemberName.trim()) return;
     setAddingMember(true);
     try {
       await addTeamMember({
-        name: newMemberName,
-        role: newMemberRole || 'Ekip Üyesi',
-        color: '#6366f1'
+        name: newMemberName.trim(),
+        role: newMemberRole || 'Soğuk Arama'
       });
       setNewMemberName('');
-      setNewMemberRole('');
+      setNewMemberRole('Soğuk Arama');
+      loadUsers();
       if (onSettingsUpdated) onSettingsUpdated();
     } catch (err) {
       alert(`Ekip üyesi eklenirken hata: ${err.message}`);
@@ -520,6 +586,38 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
           </div>
         </form>
 
+        {/* ŞİFRE DEĞİŞTİRME (GİRİŞ YAPAN YÖNETİCİ / KULLANICI) */}
+        <div className="mt-6 bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <Lock className="w-4 h-4 text-indigo-600" />
+              <span>Giriş Yapan Hesap Şifresini Değiştir ({authUser?.name} - {authUser?.role === 'admin' ? 'Yönetici' : authUser?.role})</span>
+            </label>
+          </div>
+          <form onSubmit={handleChangeMyPassword} className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="password"
+              value={adminNewPassword}
+              onChange={(e) => setAdminNewPassword(e.target.value)}
+              placeholder="Yeni şifrenizi girin..."
+              className="flex-1 text-xs bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+            />
+            <button
+              type="submit"
+              disabled={passwordChangeLoading || !adminNewPassword.trim()}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all disabled:opacity-50 cursor-pointer shrink-0"
+            >
+              {passwordChangeLoading ? 'Kaydediliyor...' : 'Şifremi Güncelle'}
+            </button>
+          </form>
+          {passwordChangeMsg && (
+            <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{passwordChangeMsg}</span>
+            </div>
+          )}
+        </div>
+
         {/* YALNIZCA ADMİN: KULLANICI & PERSONEL HESABI YÖNETİMİ */}
         {isAdmin && (
           <div className="mt-8 border-t-2 border-indigo-100 pt-6 space-y-4">
@@ -527,10 +625,10 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
               <div>
                 <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
                   <Shield className="w-4 h-4 text-indigo-600" />
-                  <span>Kullanıcı & Giriş Yönetimi (Admin & Personeller)</span>
+                  <span>Kullanıcı & Personel Yönetimi (Departmanlar & Girişler)</span>
                 </h3>
                 <p className="text-[11px] text-slate-500">
-                  Sisteme giriş yapabilecek personelleri tanımlayın ve yetkilerini belirleyin.
+                  Sisteme giriş yapabilecek personelleri, departmanlarını ve şifrelerini tanımlayın.
                 </p>
               </div>
               <button
@@ -549,73 +647,119 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
               </div>
             )}
 
+            {/* Seçili Kullanıcının Şifresini Değiştirme Modalı/Kutusu */}
+            {customPasswordUser && (
+              <form onSubmit={handleUpdateCustomUserPassword} className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                <span className="text-xs font-bold text-amber-900 shrink-0">
+                  "{customPasswordUser.name}" İçin Yeni Şifre:
+                </span>
+                <input
+                  type="password"
+                  value={customUserPassword}
+                  onChange={(e) => setCustomUserPassword(e.target.value)}
+                  placeholder="Yeni şifre belirleyin..."
+                  className="text-xs bg-white border border-amber-300 rounded-xl px-3 py-1.5 flex-1"
+                  autoFocus
+                />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="submit"
+                    className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer"
+                  >
+                    Şifreyi Güncelle
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setCustomPasswordUser(null); setCustomUserPassword(''); }}
+                    className="bg-slate-200 text-slate-700 text-xs font-semibold px-2.5 py-1.5 rounded-xl cursor-pointer"
+                  >
+                    İptal
+                  </button>
+                </div>
+              </form>
+            )}
+
             <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold">
-                    <th className="py-2 px-3">Kullanıcı Adı</th>
-                    <th className="py-2 px-3">Adı Soyadı</th>
-                    <th className="py-2 px-3">Yetki</th>
-                    <th className="py-2 px-3 text-right">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {usersList.map((u) => (
-                    <tr key={u.id} className="hover:bg-white transition-colors">
-                      <td className="py-2 px-3 font-mono font-bold text-slate-900">{u.username}</td>
-                      <td className="py-2 px-3 font-medium text-slate-700">{u.name}</td>
-                      <td className="py-2 px-3">
-                        <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                          u.role === 'admin' 
-                            ? 'bg-rose-100 text-rose-700 border border-rose-200' 
-                            : 'bg-blue-100 text-blue-700 border border-blue-200'
-                        }`}>
-                          {u.role === 'admin' ? 'YÖNETİCİ (Admin)' : 'PERSONEL (Member)'}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-right">
-                        {u.username !== 'admin' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteUser(u.id, u.username)}
-                            className="text-rose-600 hover:text-rose-800 p-1 hover:bg-rose-50 rounded transition-colors"
-                            title="Kullanıcıyı Sil"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        ) : (
-                          <span className="text-[10px] text-slate-400 font-medium italic">Kilitli</span>
-                        )}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold">
+                      <th className="py-2.5 px-3">Kullanıcı Adı</th>
+                      <th className="py-2.5 px-3">Adı Soyadı</th>
+                      <th className="py-2.5 px-3">Departman / Yetki</th>
+                      <th className="py-2.5 px-3 text-right">İşlemler</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {usersList.map((u) => {
+                      const badge = getRoleBadge(u.role);
+                      return (
+                        <tr key={u.id} className="hover:bg-white transition-colors">
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{u.username}</td>
+                          <td className="py-2.5 px-3 font-medium text-slate-700">{u.name}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] border ${badge.badgeClass}`}>
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCustomPasswordUser(u);
+                                  setCustomUserPassword('');
+                                }}
+                                className="text-indigo-600 hover:text-indigo-800 p-1.5 hover:bg-indigo-50 rounded-lg transition-colors"
+                                title="Bu kullanıcının şifresini değiştir"
+                              >
+                                <Key className="w-3.5 h-3.5" />
+                              </button>
+                              {u.username !== 'admin' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteUser(u.id, u.username)}
+                                  className="text-rose-600 hover:text-rose-800 p-1.5 hover:bg-rose-50 rounded-lg transition-colors"
+                                  title="Kullanıcıyı Sil"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 font-medium italic px-1">Kilitli</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <form onSubmit={handleCreateUser} className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3.5 space-y-2.5">
               <div className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
                 <UserPlus className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Yeni Personel / Kullanıcı Girişi Oluştur</span>
+                <span>Yeni Personel & Giriş Hesabı Oluştur</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
                 <input
                   type="text"
-                  placeholder="Kullanıcı Adı"
+                  placeholder="Kullanıcı Adı (Örn: ahmet)"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
                   className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2"
                 />
                 <input
                   type="password"
-                  placeholder="Şifre"
+                  placeholder="Giriş Şifresi"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2"
                 />
                 <input
                   type="text"
-                  placeholder="İsim (Örn: Burak)"
+                  placeholder="Ad Soyad (Örn: Ahmet Yılmaz)"
                   value={newUserName}
                   onChange={(e) => setNewUserName(e.target.value)}
                   className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2"
@@ -625,16 +769,20 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                   onChange={(e) => setNewUserRole(e.target.value)}
                   className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2 font-semibold"
                 >
-                  <option value="member">Personel (Member)</option>
+                  <option value="Soğuk Arama">Soğuk Arama</option>
+                  <option value="Saha Satış">Saha Satış</option>
+                  <option value="Yazılım">Yazılım</option>
+                  <option value="Baskı / İmalat">Baskı / İmalat</option>
+                  <option value="Dijital Ürünler">Dijital Ürünler</option>
                   <option value="admin">Yönetici (Admin)</option>
                 </select>
               </div>
               <div className="flex justify-end">
                 <button
                   type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
                 >
-                  + Kullanıcıyı Kaydet
+                  + Personeli Kaydet
                 </button>
               </div>
             </form>
@@ -733,24 +881,28 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
 
           {/* Yeni Ekip Üyesi Ekle (Yalnızca Admin) */}
           {isAdmin && (
-            <form onSubmit={handleAddMember} className="flex gap-2 pt-2">
+            <form onSubmit={handleAddMember} className="flex flex-col sm:flex-row gap-2 pt-2">
               <input
                 type="text"
-                placeholder="Yeni Kişi Adı"
+                placeholder="Yeni Personel Adı"
                 value={newMemberName}
                 onChange={(e) => setNewMemberName(e.target.value)}
                 className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1"
               />
-              <input
-                type="text"
-                placeholder="Görevi (Örn: Web Tasarım)"
-                value={newMemberRole}
+              <select
+                value={newMemberRole || 'Soğuk Arama'}
                 onChange={(e) => setNewMemberRole(e.target.value)}
-                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1"
-              />
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 font-semibold"
+              >
+                <option value="Soğuk Arama">Soğuk Arama</option>
+                <option value="Saha Satış">Saha Satış</option>
+                <option value="Yazılım">Yazılım</option>
+                <option value="Baskı / İmalat">Baskı / İmalat</option>
+                <option value="Dijital Ürünler">Dijital Ürünler</option>
+              </select>
               <button
                 type="submit"
-                disabled={addingMember || !newMemberName}
+                disabled={addingMember || !newMemberName.trim()}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shrink-0 cursor-pointer disabled:opacity-50"
               >
                 + Ekle

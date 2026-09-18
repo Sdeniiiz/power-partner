@@ -19,15 +19,22 @@ import {
   Sparkles,
   Smartphone,
   ExternalLink,
-  HelpCircle
+  HelpCircle,
+  CheckSquare,
+  Square,
+  RefreshCw,
+  Undo2
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead } from '../api';
+import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus } from '../api';
 
-export default function CallQueue({ currentUser, onLeadUpdated }) {
+export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
+  const isAdmin = authUser?.role === 'admin';
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('arama_listesi'); // Varsayılan: Arama Kuyruğu
+  const [selectedLeadIds, setSelectedLeadIds] = useState([]);
+  const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCallModal, setActiveCallModal] = useState(null); // Arama yapılan işletme
   const [callNotes, setCallNotes] = useState('');
@@ -114,15 +121,62 @@ export default function CallQueue({ currentUser, onLeadUpdated }) {
   };
 
 
+  const toggleSelectLead = (id) => {
+    setSelectedLeadIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedLeadIds.length === leads.length && leads.length > 0) {
+      setSelectedLeadIds([]);
+    } else {
+      setSelectedLeadIds(leads.map(l => l.id));
+    }
+  };
+
+  const handleRestoreToQueue = async (leadId) => {
+    try {
+      await updateBatchStatus([leadId], 'arama_listesi');
+      setActionSuccessMsg('İşletme başarıyla tekrar arama kuyruğuna aktarıldı.');
+      setSelectedLeadIds(prev => prev.filter(id => id !== leadId));
+      loadLeads();
+      if (onLeadUpdated) onLeadUpdated();
+      setTimeout(() => setActionSuccessMsg(''), 3000);
+    } catch (err) {
+      alert(`Hata: ${err.message}`);
+    }
+  };
+
+  const handleBatchRestore = async () => {
+    if (selectedLeadIds.length === 0) return;
+    if (!confirm(`Seçilen ${selectedLeadIds.length} adet işletme tekrar Arama Bekleyenler listesine aktarılacak. Onaylıyor musunuz?`)) return;
+
+    setBatchActionLoading(true);
+    try {
+      const res = await updateBatchStatus(selectedLeadIds, 'arama_listesi');
+      setActionSuccessMsg(res.message || 'Seçilen işletmeler arama listesine geri aktarıldı.');
+      setSelectedLeadIds([]);
+      loadLeads();
+      if (onLeadUpdated) onLeadUpdated();
+      setTimeout(() => setActionSuccessMsg(''), 3000);
+    } catch (err) {
+      alert(`Toplu geri alma hatası: ${err.message}`);
+    } finally {
+      setBatchActionLoading(false);
+    }
+  };
+
   const handleRequeueUnreachable = async () => {
-    if (!confirm('Diyagram kuralı: Tüm iletişimsiz işletmeler tekrar Arama Listesine aktarılacak. Devam edilsin mi?')) {
+    if (!confirm('Tüm iletişimsiz işletmeler tekrar Arama Listesine aktarılacak. Devam edilsin mi?')) {
       return;
     }
     try {
       const res = await requeueUnreachable();
-      alert(res.message);
+      setActionSuccessMsg(res.message);
       loadLeads();
       if (onLeadUpdated) onLeadUpdated();
+      setTimeout(() => setActionSuccessMsg(''), 3000);
     } catch (err) {
       alert(`Hata: ${err.message}`);
     }
@@ -227,22 +281,59 @@ export default function CallQueue({ currentUser, onLeadUpdated }) {
         </div>
 
         {/* Hızlı Arama Kutusu */}
-        <form onSubmit={handleSearchSubmit} className="flex gap-2">
+        <form onSubmit={handleSearchSubmit} className="flex gap-2 w-full sm:w-auto">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="İşletme adı veya telefon..."
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 w-48 sm:w-64 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
+            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 sm:w-64 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
           />
           <button
             type="submit"
-            className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3 py-2 rounded-xl cursor-pointer"
+            className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0"
           >
             Filtrele
           </button>
         </form>
       </div>
+
+      {/* YÖNETİCİ ÇOKLU SEÇİM & KUYRUĞA GERİ DÖNDÜRME ÇUBUĞU */}
+      {isAdmin && leads.length > 0 && (
+        <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="flex items-center gap-2 text-xs font-bold text-indigo-900 hover:text-indigo-700 cursor-pointer"
+            >
+              {selectedLeadIds.length === leads.length ? (
+                <CheckSquare className="w-4 h-4 text-indigo-600" />
+              ) : (
+                <Square className="w-4 h-4 text-indigo-400" />
+              )}
+              <span>
+                {selectedLeadIds.length === leads.length ? 'Tüm Seçimleri Kaldır' : 'Tümünü Seç'}
+              </span>
+            </button>
+            <span className="text-xs text-indigo-700/80 font-medium">
+              ({selectedLeadIds.length} / {leads.length} seçildi)
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              disabled={selectedLeadIds.length === 0 || batchActionLoading}
+              onClick={handleBatchRestore}
+              className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              <span>Seçilenleri Arama Listesine Döndür ({selectedLeadIds.length})</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Arama Kartları / Tablosu */}
       {loading ? (
@@ -262,26 +353,45 @@ export default function CallQueue({ currentUser, onLeadUpdated }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {leads.map((lead) => {
             const hasPhone = Boolean(lead.phone && lead.phone !== 'Numara Yok');
+            const isSelected = selectedLeadIds.includes(lead.id);
 
             return (
               <div 
                 key={lead.id}
-                className="bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md transition-all p-5 flex flex-col justify-between space-y-4"
+                className={`bg-white rounded-2xl border transition-all p-5 flex flex-col justify-between space-y-4 ${
+                  isSelected ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md' : 'border-slate-200/90 shadow-xs hover:shadow-md'
+                }`}
               >
                 {/* Kart Üst Bilgileri */}
                 <div>
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="font-extrabold text-slate-900 text-base leading-snug">
-                        {lead.name}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-2 py-0.5 rounded-md">
-                          {lead.district} / {lead.city}
-                        </span>
-                        <span className="bg-blue-50 text-blue-700 text-[11px] font-semibold px-2 py-0.5 rounded-md">
-                          {lead.category}
-                        </span>
+                    <div className="flex items-start gap-2.5">
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => toggleSelectLead(lead.id)}
+                          className="mt-0.5 text-slate-400 hover:text-indigo-600 cursor-pointer shrink-0"
+                          title="Seç"
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-indigo-600" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-300" />
+                          )}
+                        </button>
+                      )}
+                      <div>
+                        <h3 className="font-extrabold text-slate-900 text-base leading-snug">
+                          {lead.name}
+                        </h3>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-2 py-0.5 rounded-md">
+                            {lead.district} / {lead.city}
+                          </span>
+                          <span className="bg-blue-50 text-blue-700 text-[11px] font-semibold px-2 py-0.5 rounded-md">
+                            {lead.category}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -468,6 +578,19 @@ export default function CallQueue({ currentUser, onLeadUpdated }) {
                       <FileText className="w-4 h-4 text-blue-600" />
                       <span>Not Ekle / Çağrı Durumu Belirle</span>
                     </button>
+
+                    {/* SİSTEM YÖNETİCİSİ: KUYRUĞA GERİ DÖNDÜR BUTONU (TEKİL) */}
+                    {isAdmin && (statusFilter !== 'arama_listesi' || lead.status !== 'arama_listesi') && (
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreToQueue(lead.id)}
+                        className="w-full bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs"
+                        title="Bu işletmeyi tekrar Arama Listesine aktar"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Arama Listesine Geri Döndür</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 

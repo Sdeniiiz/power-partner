@@ -339,6 +339,31 @@ router.delete('/campaigns/delete', (req, res) => {
   }
 });
 
+// Toplu veya Tekil Durum Değiştir / Kuyruğa Geri Döndür (Örn: Mutlak Olumsuz / İletişimsiz -> Arama Listesi)
+router.post('/batch-status', (req, res) => {
+  try {
+    const { leadIds, status } = req.body;
+    if (!Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ error: 'İşlem yapılacak işletme ID listesi gereklidir.' });
+    }
+    const targetStatus = status || 'arama_listesi';
+    const placeholders = leadIds.map(() => '?').join(',');
+    const result = db.prepare(`
+      UPDATE leads 
+      SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id IN (${placeholders})
+    `).run(targetStatus, ...leadIds);
+
+    res.json({
+      success: true,
+      count: result.changes,
+      message: `${result.changes} işletme başarıyla '${targetStatus}' durumuna güncellendi.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Diyagramdaki Döngü: Tüm İletişimsizlikleri tekrar Günlük Arama Listesine geri aktar
 router.post('/requeue-unreachable', (req, res) => {
   try {

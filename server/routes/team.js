@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
+const ROLE_COLORS = {
+  'Soğuk Arama': '#0284c7', // Mavi/Sky
+  'Saha Satış': '#16a34a', // Yeşil
+  'Yazılım': '#8b5cf6', // Mor
+  'Baskı / İmalat': '#ea580c', // Turuncu
+  'Dijital Ürünler': '#0d9488', // Teal
+  'admin': '#e11d48', // Gül/Kırmızı
+  'Yönetici (Admin)': '#e11d48'
+};
+
 // Ekip üyelerini listele (iş sayıları ile)
 router.get('/members', (req, res) => {
   try {
@@ -22,16 +32,33 @@ router.get('/members', (req, res) => {
   }
 });
 
-// Yeni ekip üyesi ekle
+// Yeni ekip üyesi ekle (users tablosu ile tam senkron)
 router.post('/members', (req, res) => {
   try {
-    const { name, role, email, phone, color } = req.body;
+    const { name, role, email, phone, color, password, username } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim gereklidir.' });
+
+    const finalRole = role || 'Soğuk Arama';
+    const memberColor = color || ROLE_COLORS[finalRole] || '#3B82F6';
 
     const result = db.prepare(`
       INSERT INTO team_members (name, role, email, phone, color)
       VALUES (?, ?, ?, ?, ?)
-    `).run(name, role || '', email || '', phone || '', color || '#3B82F6');
+    `).run(name.trim(), finalRole, email || '', phone || '', memberColor);
+
+    // users tablosuna da ekle (otomatik giriş hesabı)
+    const baseUsername = (username || name).trim().toLowerCase().replace(/[^a-z0-9]/g, '') || `user${result.lastInsertRowid}`;
+    let finalUsername = baseUsername;
+    let count = 1;
+    while (db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(finalUsername)) {
+      finalUsername = `${baseUsername}${count++}`;
+    }
+
+    const userRole = finalRole === 'Yönetici (Admin)' ? 'admin' : finalRole;
+    db.prepare(`
+      INSERT INTO users (username, password, name, role, person)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(finalUsername, password ? password.trim() : '123', name.trim(), userRole, name.trim());
 
     const created = db.prepare('SELECT * FROM team_members WHERE id = ?').get(result.lastInsertRowid);
     res.json({ success: true, data: created });
@@ -40,10 +67,17 @@ router.post('/members', (req, res) => {
   }
 });
 
-// Ekip üyesi sil
+// Ekip üyesi sil (users tablosundan da temizle)
 router.delete('/members/:id', (req, res) => {
   try {
     const memberId = req.params.id;
+    const member = db.prepare('SELECT * FROM team_members WHERE id = ?').get(memberId);
+    if (member) {
+      const u = db.prepare('SELECT id, username FROM users WHERE LOWER(name) = LOWER(?)').get(member.name.trim());
+      if (u && u.username.toLowerCase() !== 'admin') {
+        db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
+      }
+    }
     // Bağlı işleri boşa çıkar veya sil
     db.prepare('UPDATE jobs SET assigned_member_id = NULL WHERE assigned_member_id = ?').run(memberId);
     db.prepare('UPDATE categories SET default_member_id = NULL WHERE default_member_id = ?').run(memberId);
@@ -141,25 +175,52 @@ router.post('/users', (req, res) => {
       return res.status(400).json({ error: 'Kullanıcı adı, şifre ve isim gereklidir.' });
     }
 
-    const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(username.trim());
+    const trimmedUser = username.trim().toLowerCase();
+    const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(trimmedUser);
     if (existing) {
       return res.status(400).json({ error: 'Bu kullanıcı adı zaten kullanılıyor.' });
     }
 
+    const finalRole = role || 'Soğuk Arama';
+    const displayRole = finalRole === 'admin' ? 'Yönetici (Admin)' : finalRole;
+    const color = ROLE_COLORS[finalRole] || '#2563eb';
+
     const result = db.prepare(`
       INSERT INTO users (username, password, name, role, person)
       VALUES (?, ?, ?, ?, ?)
-    `).run(username.trim().toLowerCase(), password.trim(), name.trim(), role || 'member', person || name.trim());
+    `).run(trimmedUser, password.trim(), name.trim(), finalRole, person || name.trim());
 
-    // Otomatik olarak team_members tablosuna da ekleyelim (eğer yoksa)
+    // Otomatik olarak team_members tablosuna da ekleyelim (eğer yoksa) veya güncelleyelim
     const existingMember = db.prepare('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)').get(name.trim());
-    if (!existingMember && role !== 'admin') {
+    if (!existingMember) {
       db.prepare('INSERT INTO team_members (name, role, color) VALUES (?, ?, ?)')
-        .run(name.trim(), 'Ekip Üyesi', '#2563eb');
+        .run(name.trim(), displayRole, color);
+    } else {
+      db.prepare('UPDATE team_members SET role = ?, color = ? WHERE id = ?')
+        .run(displayRole, color, existingMember.id);
     }
 
     const created = db.prepare('SELECT id, username, name, role, person FROM users WHERE id = ?').get(result.lastInsertRowid);
-    res.json({ success: true, data: created, message: 'Kullanıcı başarıyla oluşturuldu.' });
+    res.json({ success: true, data: created, message: 'Personel / kullanıcı başarıyla oluşturuldu.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Kullanıcı Şifre Değiştir (Yönetici veya kullanıcının kendisi)
+router.put('/users/:id/password', (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { newPassword } = req.body;
+    if (!newPassword || !newPassword.trim()) {
+      return res.status(400).json({ error: 'Yeni şifre boş olamaz.' });
+    }
+
+    const user = db.prepare('SELECT id, username, name FROM users WHERE id = ?').get(userId);
+    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(newPassword.trim(), userId);
+    res.json({ success: true, message: `${user.name} kullanıcısının şifresi başarıyla güncellendi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -176,8 +237,16 @@ router.delete('/users/:id', (req, res) => {
       return res.status(400).json({ error: 'Ana yönetici hesabı silinemez.' });
     }
 
+    // team_members'dan da temizle
+    const member = db.prepare('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)').get(user.name.trim());
+    if (member) {
+      db.prepare('UPDATE jobs SET assigned_member_id = NULL WHERE assigned_member_id = ?').run(member.id);
+      db.prepare('UPDATE categories SET default_member_id = NULL WHERE default_member_id = ?').run(member.id);
+      db.prepare('DELETE FROM team_members WHERE id = ?').run(member.id);
+    }
+
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-    res.json({ success: true, message: `${user.name} kullanıcısı silindi.` });
+    res.json({ success: true, message: `${user.name} personeli ve kullanıcı hesabı silindi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

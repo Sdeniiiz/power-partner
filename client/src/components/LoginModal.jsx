@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogIn, Shield, User, Key, AlertCircle, Sparkles } from 'lucide-react';
+import { LogIn, Shield, User, Key, AlertCircle } from 'lucide-react';
 import { loginUser } from '../api';
 
 export default function LoginModal({ onLoginSuccess }) {
@@ -28,11 +28,6 @@ export default function LoginModal({ onLoginSuccess }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickLogin = (uname, pass) => {
-    setUsername(uname);
-    setPassword(pass);
   };
 
   return (
@@ -100,48 +95,6 @@ export default function LoginModal({ onLoginSuccess }) {
             )}
           </button>
         </form>
-
-        {/* Quick Login / Demo Accounts */}
-        <div className="p-4 bg-slate-900/40 border-t border-slate-700/60">
-          <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-400 mb-2.5">
-            <Sparkles className="w-3 h-3 text-amber-400" />
-            <span>Hızlı Test Girişleri (Tek Tıkla Seç):</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin', 'admin123')}
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-blue-500/30 text-blue-300 rounded-lg text-left transition-colors flex flex-col"
-            >
-              <span className="font-bold">admin (Yönetici)</span>
-              <span className="text-[10px] text-slate-400">Şifre: admin123</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('sezai', '123')}
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg text-left transition-colors flex flex-col"
-            >
-              <span className="font-bold">sezai (Personel)</span>
-              <span className="text-[10px] text-slate-400">Şifre: 123</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('yes', '123')}
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg text-left transition-colors flex flex-col"
-            >
-              <span className="font-bold">yes (Personel)</span>
-              <span className="text-[10px] text-slate-400">Şifre: 123</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('burak', '123')}
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg text-left transition-colors flex flex-col"
-            >
-              <span className="font-bold">burak (Personel)</span>
-              <span className="text-[10px] text-slate-400">Şifre: 123</span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -139,13 +139,13 @@ export default function MemberDashboard({ currentUser, teamMembers, onJobUpdated
             </button>
           )}
 
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
-            <span className="text-[11px] font-bold text-slate-500 px-2">Ekran Değiştir:</span>
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 overflow-x-auto max-w-full">
+            <span className="text-[11px] font-bold text-slate-500 px-2 shrink-0">Ekran Değiştir:</span>
             {teamMembers.map(m => (
               <button
                 key={m.id}
                 onClick={() => setActiveMember(m)}
-                className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${
+                className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all shrink-0 ${
                   activeMember?.id === m.id
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
