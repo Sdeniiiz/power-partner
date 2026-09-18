@@ -23,16 +23,25 @@ import {
   CheckSquare,
   Square,
   RefreshCw,
-  Undo2
+  Undo2,
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus } from '../api';
+import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta } from '../api';
 
 export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const isAdmin = authUser?.role === 'admin';
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('arama_listesi'); // Varsayılan: Arama Kuyruğu
+  const [districtFilter, setDistrictFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [phoneTypeFilter, setPhoneTypeFilter] = useState('');
+  const [websiteFilter, setWebsiteFilter] = useState('');
+  const [instagramFilter, setInstagramFilter] = useState('');
+  const [ratingFilter, setRatingFilter] = useState('');
+  const [metaFilters, setMetaFilters] = useState({ districts: [], categories: [] });
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,12 +52,37 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
-  const loadLeads = async () => {
+  const loadFilterMeta = async () => {
+    try {
+      const res = await getLeadFilterMeta();
+      if (res) {
+        setMetaFilters({
+          districts: res.districts || [],
+          categories: res.categories || []
+        });
+      }
+    } catch (err) {
+      console.error('Filtre meta seçenekleri yüklenirken hata:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadFilterMeta();
+  }, []);
+
+  const loadLeads = async (customSearch) => {
     setLoading(true);
     try {
+      const activeSearch = customSearch !== undefined ? customSearch : searchQuery;
       const res = await getLeads({
         status: statusFilter === 'all' ? undefined : statusFilter,
-        search: searchQuery || undefined
+        search: activeSearch || undefined,
+        district: districtFilter || undefined,
+        category: categoryFilter || undefined,
+        phone_type: phoneTypeFilter || undefined,
+        has_website: websiteFilter !== '' ? websiteFilter : undefined,
+        has_instagram: instagramFilter !== '' ? instagramFilter : undefined,
+        min_rating: ratingFilter || undefined
       });
       setLeads(res.data || []);
 
@@ -61,7 +95,28 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter]);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter]);
+
+  const activeFiltersCount = [
+    districtFilter,
+    categoryFilter,
+    phoneTypeFilter,
+    websiteFilter,
+    instagramFilter,
+    ratingFilter,
+    searchQuery
+  ].filter(Boolean).length;
+
+  const handleResetFilters = () => {
+    setDistrictFilter('');
+    setCategoryFilter('');
+    setPhoneTypeFilter('');
+    setWebsiteFilter('');
+    setInstagramFilter('');
+    setRatingFilter('');
+    setSearchQuery('');
+    loadLeads('');
+  };
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -296,6 +351,132 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
             Filtrele
           </button>
         </form>
+      </div>
+
+      {/* Gelişmiş Filtreleme Çubuğu (İlçe, Sektör, İletişim & Kalite Kriterleri) */}
+      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+            <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+            <span>Detaylı Kriter Filtreleri</span>
+            {activeFiltersCount > 0 && (
+              <span className="bg-blue-100 text-blue-700 text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+                {activeFiltersCount} Aktif Filtre
+              </span>
+            )}
+          </div>
+          {activeFiltersCount > 0 && (
+            <button
+              onClick={handleResetFilters}
+              className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Filtreleri Sıfırla</span>
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5">
+          {/* İlçe Filtresi */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              İlçe
+            </label>
+            <select
+              value={districtFilter}
+              onChange={(e) => setDistrictFilter(e.target.value)}
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">Tüm İlçeler ({metaFilters.districts?.length || 0})</option>
+              {metaFilters.districts?.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Sektör / Kategori Filtresi */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              Sektör / Kategori
+            </label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">Tüm Sektörler ({metaFilters.categories?.length || 0})</option>
+              {metaFilters.categories?.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Telefon Türü */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              Telefon Tipi
+            </label>
+            <select
+              value={phoneTypeFilter}
+              onChange={(e) => setPhoneTypeFilter(e.target.value)}
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">Tüm Numaralar</option>
+              <option value="mobile">📱 Sadece Cep (GSM / WhatsApp)</option>
+              <option value="landline">☎️ Sadece Sabit Hat</option>
+              <option value="has_phone">📞 Numarası Olanlar</option>
+            </select>
+          </div>
+
+          {/* Web Sitesi Durumu */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              Web Sitesi
+            </label>
+            <select
+              value={websiteFilter}
+              onChange={(e) => setWebsiteFilter(e.target.value)}
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">Tümü</option>
+              <option value="1">🌐 Web Sitesi Var</option>
+              <option value="0">❌ Web Sitesi Yok (Fırsat!)</option>
+            </select>
+          </div>
+
+          {/* Instagram Durumu */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              Instagram
+            </label>
+            <select
+              value={instagramFilter}
+              onChange={(e) => setInstagramFilter(e.target.value)}
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">Tümü</option>
+              <option value="1">📸 Instagram Var</option>
+              <option value="0">❌ Instagram Yok</option>
+            </select>
+          </div>
+
+          {/* Google Puanı */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              Google Puanı
+            </label>
+            <select
+              value={ratingFilter}
+              onChange={(e) => setRatingFilter(e.target.value)}
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">Tüm Puanlar</option>
+              <option value="4.5">★ 4.5 ve Üzeri</option>
+              <option value="4.0">★ 4.0 ve Üzeri</option>
+              <option value="3.5">★ 3.5 ve Üzeri</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* YÖNETİCİ ÇOKLU SEÇİM & KUYRUĞA GERİ DÖNDÜRME ÇUBUĞU */}

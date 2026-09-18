@@ -107,36 +107,84 @@ router.post('/import', (req, res) => {
   }
 });
 
+// İlçe ve Sektör/Kategori filtre seçeneklerini getir
+router.get('/meta/filters', (req, res) => {
+  try {
+    const districts = db.prepare(`
+      SELECT DISTINCT district 
+      FROM leads 
+      WHERE district IS NOT NULL AND TRIM(district) != '' 
+      ORDER BY district ASC
+    `).all().map(r => r.district);
+
+    const categories = db.prepare(`
+      SELECT DISTINCT category 
+      FROM leads 
+      WHERE category IS NOT NULL AND TRIM(category) != '' 
+      ORDER BY category ASC
+    `).all().map(r => r.category);
+
+    res.json({ districts, categories });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // İşletmeleri listele ve filtrele
 router.get('/', (req, res) => {
   try {
-    const { status, district, category, phone_type, search, limit = 200 } = req.query;
+    const { 
+      status, district, category, phone_type, search,
+      has_website, has_instagram, min_rating, min_score,
+      limit = 300 
+    } = req.query;
 
     let query = 'SELECT * FROM leads WHERE 1=1';
     const params = [];
 
-    if (status) {
+    if (status && status !== 'all') {
       query += ' AND status = ?';
       params.push(status);
     }
-    if (district) {
-      query += ' AND district LIKE ?';
-      params.push(`%${district}%`);
+    if (district && district !== 'all') {
+      query += ' AND district = ?';
+      params.push(district);
     }
-    if (category) {
-      query += ' AND category LIKE ?';
-      params.push(`%${category}%`);
+    if (category && category !== 'all') {
+      query += ' AND category = ?';
+      params.push(category);
     }
-    if (phone_type) {
-      query += ' AND phone_type = ?';
-      params.push(phone_type);
+    if (phone_type && phone_type !== 'all') {
+      if (phone_type === 'mobile') {
+        query += ' AND is_mobile = 1';
+      } else if (phone_type === 'landline') {
+        query += ' AND is_mobile = 0 AND phone IS NOT NULL AND phone != "" AND phone != "Numara Yok"';
+      } else if (phone_type === 'has_phone') {
+        query += ' AND phone IS NOT NULL AND phone != "" AND phone != "Numara Yok"';
+      }
     }
-    if (search) {
+    if (has_website !== undefined && has_website !== 'all' && has_website !== '') {
+      query += ' AND has_website = ?';
+      params.push(Number(has_website));
+    }
+    if (has_instagram !== undefined && has_instagram !== 'all' && has_instagram !== '') {
+      query += ' AND has_instagram = ?';
+      params.push(Number(has_instagram));
+    }
+    if (min_rating && min_rating !== 'all' && min_rating !== '') {
+      query += ' AND rating >= ?';
+      params.push(Number(min_rating));
+    }
+    if (min_score && min_score !== 'all' && min_score !== '') {
+      query += ' AND score >= ?';
+      params.push(Number(min_score));
+    }
+    if (search && search.trim()) {
       query += ' AND (name LIKE ? OR phone LIKE ? OR address LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
     }
 
-    query += ' ORDER BY id DESC LIMIT ?';
+    query += ' ORDER BY score DESC, id DESC LIMIT ?';
     params.push(Number(limit));
 
     const rows = db.prepare(query).all(...params);

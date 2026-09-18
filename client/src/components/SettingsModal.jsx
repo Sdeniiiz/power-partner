@@ -40,7 +40,9 @@ import {
   deleteUser,
   deleteTeamMember,
   clearCallQueue,
-  clearAllLeads
+  clearAllLeads,
+  getTeamRoles,
+  addCustomRole
 } from '../api';
 
 export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, teamMembers, categories, authUser }) {
@@ -62,6 +64,21 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [cleanMsg, setCleanMsg] = useState('');
 
+  // Dinamik Rol Yönetimi State
+  const [availableRoles, setAvailableRoles] = useState([
+    'Soğuk Arama',
+    'Saha Satış',
+    'Yazılım',
+    'Baskı / İmalat',
+    'Dijital Ürünler',
+    'Müdür',
+    'admin'
+  ]);
+  const [isAddingCustomRole, setIsAddingCustomRole] = useState(false);
+  const [customRoleInput, setCustomRoleInput] = useState('');
+  const [isAddingMemberCustomRole, setIsAddingMemberCustomRole] = useState(false);
+  const [customMemberRoleInput, setCustomMemberRoleInput] = useState('');
+
   // Şifre Değiştirme State
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
@@ -81,7 +98,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
 
   // Yeni ekip üyesi ekleme formu
   const [newMemberName, setNewMemberName] = useState('');
-  const [newMemberRole, setNewMemberRole] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState('Soğuk Arama');
   const [addingMember, setAddingMember] = useState(false);
 
   // Yeni kategori ekleme formu
@@ -90,6 +107,51 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
   const [addingCat, setAddingCat] = useState(false);
 
   const isAdmin = authUser?.role === 'admin';
+
+  const loadRoles = async () => {
+    try {
+      const res = await getTeamRoles();
+      if (res.data && res.data.length > 0) {
+        setAvailableRoles(res.data);
+      }
+    } catch (err) {
+      console.error('Roller yüklenemedi:', err);
+    }
+  };
+
+  const handleSaveCustomRole = async () => {
+    const trimmed = customRoleInput.trim();
+    if (!trimmed) return;
+    try {
+      await addCustomRole(trimmed);
+      if (!availableRoles.includes(trimmed)) {
+        setAvailableRoles(prev => [...prev, trimmed]);
+      }
+      setNewUserRole(trimmed);
+      setCustomRoleInput('');
+      setIsAddingCustomRole(false);
+      setUserActionMsg(`✓ "${trimmed}" rolü sisteme eklendi ve seçildi.`);
+      setTimeout(() => setUserActionMsg(''), 3000);
+    } catch (err) {
+      alert(`Rol ekleme hatası: ${err.message}`);
+    }
+  };
+
+  const handleSaveMemberCustomRole = async () => {
+    const trimmed = customMemberRoleInput.trim();
+    if (!trimmed) return;
+    try {
+      await addCustomRole(trimmed);
+      if (!availableRoles.includes(trimmed)) {
+        setAvailableRoles(prev => [...prev, trimmed]);
+      }
+      setNewMemberRole(trimmed);
+      setCustomMemberRoleInput('');
+      setIsAddingMemberCustomRole(false);
+    } catch (err) {
+      alert(`Rol ekleme hatası: ${err.message}`);
+    }
+  };
 
   const loadUsers = async () => {
     if (!isAdmin) return;
@@ -127,6 +189,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       }).catch(err => console.error(err));
       loadCampaigns();
       loadUsers();
+      loadRoles();
     }
   }, [isOpen]);
 
@@ -215,6 +278,8 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       case 'admin':
       case 'Yönetici (Admin)':
         return { label: 'Yönetici (Admin)', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200' };
+      case 'Müdür':
+        return { label: 'Müdür', badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold' };
       case 'Soğuk Arama':
         return { label: 'Soğuk Arama', badgeClass: 'bg-sky-100 text-sky-800 border-sky-200' };
       case 'Saha Satış':
@@ -222,11 +287,11 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       case 'Yazılım':
         return { label: 'Yazılım', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200' };
       case 'Baskı / İmalat':
-        return { label: 'Baskı / İmalat', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' };
+        return { label: 'Baskı / İmalat', badgeClass: 'bg-orange-100 text-orange-800 border-orange-200' };
       case 'Dijital Ürünler':
         return { label: 'Dijital Ürünler', badgeClass: 'bg-teal-100 text-teal-800 border-teal-200' };
       default:
-        return { label: role || 'Personel', badgeClass: 'bg-blue-100 text-blue-700 border-blue-200' };
+        return { label: role || 'Personel', badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200 font-semibold' };
     }
   };
 
@@ -765,18 +830,59 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                   className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2"
                 />
                 <select
-                  value={newUserRole}
-                  onChange={(e) => setNewUserRole(e.target.value)}
-                  className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2 font-semibold"
+                  value={isAddingCustomRole ? '__custom__' : newUserRole}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setIsAddingCustomRole(true);
+                    } else {
+                      setIsAddingCustomRole(false);
+                      setNewUserRole(e.target.value);
+                    }
+                  }}
+                  className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2 font-semibold text-slate-800"
                 >
-                  <option value="Soğuk Arama">Soğuk Arama</option>
-                  <option value="Saha Satış">Saha Satış</option>
-                  <option value="Yazılım">Yazılım</option>
-                  <option value="Baskı / İmalat">Baskı / İmalat</option>
-                  <option value="Dijital Ürünler">Dijital Ürünler</option>
-                  <option value="admin">Yönetici (Admin)</option>
+                  {availableRoles.map(r => (
+                    <option key={r} value={r}>
+                      {r === 'admin' ? 'Yönetici (Admin)' : r}
+                    </option>
+                  ))}
+                  <option value="__custom__" className="text-indigo-600 font-bold">
+                    + Özel Rol / Departman Ekle...
+                  </option>
                 </select>
               </div>
+
+              {isAddingCustomRole && (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 p-2.5 bg-indigo-100/70 border border-indigo-200 rounded-xl animate-fade-in">
+                  <span className="text-xs font-bold text-indigo-900 shrink-0">Yeni Rol Tanımla:</span>
+                  <input
+                    type="text"
+                    placeholder="Örn: Müdür, Satış Müdürü, Operasyon..."
+                    value={customRoleInput}
+                    onChange={(e) => setCustomRoleInput(e.target.value)}
+                    className="text-xs bg-white border border-indigo-300 rounded-xl px-3 py-1.5 flex-1"
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomRole}
+                      disabled={!customRoleInput.trim()}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl cursor-pointer disabled:opacity-50"
+                    >
+                      Rolü Kaydet
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setIsAddingCustomRole(false); setCustomRoleInput(''); }}
+                      className="text-slate-600 hover:text-slate-800 text-xs px-2.5 py-1.5 cursor-pointer"
+                    >
+                      Vazgeç
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end">
                 <button
                   type="submit"
@@ -881,33 +987,76 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
 
           {/* Yeni Ekip Üyesi Ekle (Yalnızca Admin) */}
           {isAdmin && (
-            <form onSubmit={handleAddMember} className="flex flex-col sm:flex-row gap-2 pt-2">
-              <input
-                type="text"
-                placeholder="Yeni Personel Adı"
-                value={newMemberName}
-                onChange={(e) => setNewMemberName(e.target.value)}
-                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1"
-              />
-              <select
-                value={newMemberRole || 'Soğuk Arama'}
-                onChange={(e) => setNewMemberRole(e.target.value)}
-                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 font-semibold"
-              >
-                <option value="Soğuk Arama">Soğuk Arama</option>
-                <option value="Saha Satış">Saha Satış</option>
-                <option value="Yazılım">Yazılım</option>
-                <option value="Baskı / İmalat">Baskı / İmalat</option>
-                <option value="Dijital Ürünler">Dijital Ürünler</option>
-              </select>
-              <button
-                type="submit"
-                disabled={addingMember || !newMemberName.trim()}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shrink-0 cursor-pointer disabled:opacity-50"
-              >
-                + Ekle
-              </button>
-            </form>
+            <div className="space-y-2 pt-2">
+              <form onSubmit={handleAddMember} className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  placeholder="Yeni Personel Adı"
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1"
+                />
+                <select
+                  value={isAddingMemberCustomRole ? '__custom__' : (newMemberRole || 'Soğuk Arama')}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setIsAddingMemberCustomRole(true);
+                    } else {
+                      setIsAddingMemberCustomRole(false);
+                      setNewMemberRole(e.target.value);
+                    }
+                  }}
+                  className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 font-semibold text-slate-800"
+                >
+                  {availableRoles.filter(r => r !== 'admin').map(r => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                  <option value="__custom__" className="text-indigo-600 font-bold">
+                    + Özel Rol / Departman Ekle...
+                  </option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={addingMember || !newMemberName.trim()}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  + Ekle
+                </button>
+              </form>
+
+              {isAddingMemberCustomRole && (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl animate-fade-in">
+                  <span className="text-xs font-bold text-indigo-900 shrink-0">Yeni Rol Tanımla:</span>
+                  <input
+                    type="text"
+                    placeholder="Örn: Müdür, Satış Müdürü..."
+                    value={customMemberRoleInput}
+                    onChange={(e) => setCustomMemberRoleInput(e.target.value)}
+                    className="text-xs bg-white border border-indigo-300 rounded-xl px-3 py-1.5 flex-1"
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleSaveMemberCustomRole}
+                      disabled={!customMemberRoleInput.trim()}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl cursor-pointer disabled:opacity-50"
+                    >
+                      Rolü Kaydet
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setIsAddingMemberCustomRole(false); setCustomMemberRoleInput(''); }}
+                      className="text-slate-600 hover:text-slate-800 text-xs px-2.5 py-1.5 cursor-pointer"
+                    >
+                      Vazgeç
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

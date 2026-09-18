@@ -8,9 +8,79 @@ const ROLE_COLORS = {
   'Yazılım': '#8b5cf6', // Mor
   'Baskı / İmalat': '#ea580c', // Turuncu
   'Dijital Ürünler': '#0d9488', // Teal
+  'Müdür': '#b45309', // Altın/Amber
   'admin': '#e11d48', // Gül/Kırmızı
   'Yönetici (Admin)': '#e11d48'
 };
+
+const PALETTE = ['#0284c7', '#16a34a', '#8b5cf6', '#ea580c', '#0d9488', '#b45309', '#4f46e5', '#db2777', '#0891b2', '#475569'];
+function getRoleColor(role) {
+  if (!role) return '#2563eb';
+  if (ROLE_COLORS[role]) return ROLE_COLORS[role];
+  let hash = 0;
+  for (let i = 0; i < role.length; i++) hash = role.charCodeAt(i) + ((hash << 5) - hash);
+  return PALETTE[Math.abs(hash) % PALETTE.length];
+}
+
+// Tüm rolleri listele (Varsayılan + Kayıtlı Özel Roller)
+router.get('/roles', (req, res) => {
+  try {
+    const defaultRoles = [
+      'Soğuk Arama',
+      'Saha Satış',
+      'Yazılım',
+      'Baskı / İmalat',
+      'Dijital Ürünler',
+      'Müdür',
+      'admin'
+    ];
+
+    const dbRoles = db.prepare(`
+      SELECT DISTINCT role FROM users WHERE role IS NOT NULL AND TRIM(role) != ''
+      UNION
+      SELECT DISTINCT role FROM team_members WHERE role IS NOT NULL AND TRIM(role) != ''
+    `).all().map(r => r.role);
+
+    const savedCustom = db.prepare("SELECT value FROM settings WHERE key = 'custom_roles'").get();
+    let customList = [];
+    try {
+      if (savedCustom?.value) customList = JSON.parse(savedCustom.value);
+    } catch(e) {}
+
+    const allRoles = Array.from(new Set([...defaultRoles, ...dbRoles, ...customList]))
+      .filter(r => r && r !== 'member' && r !== 'Ekip Üyesi');
+
+    res.json({ data: allRoles });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Yeni özel rol ekle
+router.post('/roles', (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!role || !role.trim()) {
+      return res.status(400).json({ error: 'Rol adı gereklidir.' });
+    }
+    const cleanRole = role.trim();
+
+    const savedCustom = db.prepare("SELECT value FROM settings WHERE key = 'custom_roles'").get();
+    let customList = [];
+    try {
+      if (savedCustom?.value) customList = JSON.parse(savedCustom.value);
+    } catch(e) {}
+
+    if (!customList.includes(cleanRole)) {
+      customList.push(cleanRole);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('custom_roles', ?)").run(JSON.stringify(customList));
+    }
+
+    res.json({ success: true, role: cleanRole, message: `"${cleanRole}" rolü başarıyla kaydedildi.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Ekip üyelerini listele (iş sayıları ile)
 router.get('/members', (req, res) => {
@@ -39,7 +109,7 @@ router.post('/members', (req, res) => {
     if (!name) return res.status(400).json({ error: 'İsim gereklidir.' });
 
     const finalRole = role || 'Soğuk Arama';
-    const memberColor = color || ROLE_COLORS[finalRole] || '#3B82F6';
+    const memberColor = color || getRoleColor(finalRole);
 
     const result = db.prepare(`
       INSERT INTO team_members (name, role, email, phone, color)
@@ -183,7 +253,7 @@ router.post('/users', (req, res) => {
 
     const finalRole = role || 'Soğuk Arama';
     const displayRole = finalRole === 'admin' ? 'Yönetici (Admin)' : finalRole;
-    const color = ROLE_COLORS[finalRole] || '#2563eb';
+    const color = getRoleColor(finalRole);
 
     const result = db.prepare(`
       INSERT INTO users (username, password, name, role, person)
