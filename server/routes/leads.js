@@ -158,9 +158,9 @@ router.get('/', (req, res) => {
       if (phone_type === 'mobile') {
         query += ' AND is_mobile = 1';
       } else if (phone_type === 'landline') {
-        query += ' AND is_mobile = 0 AND phone IS NOT NULL AND phone != "" AND phone != "Numara Yok"';
+        query += " AND (phone_type = 'landline' OR (is_mobile = 0 AND phone IS NOT NULL AND phone != '' AND phone != 'Numara Yok'))";
       } else if (phone_type === 'has_phone') {
-        query += ' AND phone IS NOT NULL AND phone != "" AND phone != "Numara Yok"';
+        query += " AND phone IS NOT NULL AND phone != '' AND phone != 'Numara Yok'";
       }
     }
     if (has_website !== undefined && has_website !== 'all' && has_website !== '') {

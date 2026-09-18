@@ -354,13 +354,13 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
       </div>
 
       {/* Gelişmiş Filtreleme Çubuğu (İlçe, Sektör, İletişim & Kalite Kriterleri) */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+      <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs space-y-3 min-w-0 max-w-full">
         <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-100">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
-            <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+            <SlidersHorizontal className="w-4 h-4 text-blue-600 shrink-0" />
             <span>Detaylı Kriter Filtreleri</span>
             {activeFiltersCount > 0 && (
-              <span className="bg-blue-100 text-blue-700 text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+              <span className="bg-blue-100 text-blue-700 text-[11px] font-extrabold px-2 py-0.5 rounded-full shrink-0">
                 {activeFiltersCount} Aktif Filtre
               </span>
             )}
@@ -368,7 +368,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           {activeFiltersCount > 0 && (
             <button
               onClick={handleResetFilters}
-              className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+              className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer shrink-0"
             >
               <X className="w-3.5 h-3.5" />
               <span>Filtreleri Sıfırla</span>
@@ -376,16 +376,16 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-2.5 min-w-0">
           {/* İlçe Filtresi */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
               İlçe
             </label>
             <select
               value={districtFilter}
               onChange={(e) => setDistrictFilter(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
             >
               <option value="">Tüm İlçeler ({metaFilters.districts?.length || 0})</option>
               {metaFilters.districts?.map(d => (
@@ -395,14 +395,14 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </div>
 
           {/* Sektör / Kategori Filtresi */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
               Sektör / Kategori
             </label>
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
             >
               <option value="">Tüm Sektörler ({metaFilters.categories?.length || 0})</option>
               {metaFilters.categories?.map(c => (
@@ -412,47 +412,47 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </div>
 
           {/* Telefon Türü */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
               Telefon Tipi
             </label>
             <select
               value={phoneTypeFilter}
               onChange={(e) => setPhoneTypeFilter(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
             >
               <option value="">Tüm Numaralar</option>
-              <option value="mobile">📱 Sadece Cep (GSM / WhatsApp)</option>
+              <option value="mobile">📱 Sadece Cep (GSM)</option>
               <option value="landline">☎️ Sadece Sabit Hat</option>
               <option value="has_phone">📞 Numarası Olanlar</option>
             </select>
           </div>
 
           {/* Web Sitesi Durumu */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
               Web Sitesi
             </label>
             <select
               value={websiteFilter}
               onChange={(e) => setWebsiteFilter(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
             >
               <option value="">Tümü</option>
               <option value="1">🌐 Web Sitesi Var</option>
-              <option value="0">❌ Web Sitesi Yok (Fırsat!)</option>
+              <option value="0">❌ Web Sitesi Yok</option>
             </select>
           </div>
 
           {/* Instagram Durumu */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
               Instagram
             </label>
             <select
               value={instagramFilter}
               onChange={(e) => setInstagramFilter(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
             >
               <option value="">Tümü</option>
               <option value="1">📸 Instagram Var</option>
@@ -461,14 +461,14 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </div>
 
           {/* Google Puanı */}
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
               Google Puanı
             </label>
             <select
               value={ratingFilter}
               onChange={(e) => setRatingFilter(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
             >
               <option value="">Tüm Puanlar</option>
               <option value="4.5">★ 4.5 ve Üzeri</option>
@@ -531,7 +531,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4 min-w-0">
           {leads.map((lead) => {
             const hasPhone = Boolean(lead.phone && lead.phone !== 'Numara Yok');
             const isSelected = selectedLeadIds.includes(lead.id);
@@ -539,14 +539,14 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
             return (
               <div 
                 key={lead.id}
-                className={`bg-white rounded-2xl border transition-all p-5 flex flex-col justify-between space-y-4 ${
+                className={`bg-white rounded-2xl border transition-all p-4 sm:p-5 flex flex-col justify-between space-y-4 min-w-0 overflow-hidden break-words ${
                   isSelected ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md' : 'border-slate-200/90 shadow-xs hover:shadow-md'
                 }`}
               >
                 {/* Kart Üst Bilgileri */}
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-2.5">
+                    <div className="flex items-start gap-2 sm:gap-2.5 min-w-0 flex-1">
                       {isAdmin && (
                         <button
                           type="button"
@@ -561,15 +561,15 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                           )}
                         </button>
                       )}
-                      <div>
-                        <h3 className="font-extrabold text-slate-900 text-base leading-snug">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-extrabold text-slate-900 text-sm sm:text-base leading-snug break-words">
                           {lead.name}
                         </h3>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-2 py-0.5 rounded-md">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1">
+                          <span className="bg-slate-100 text-slate-700 text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-md">
                             {lead.district} / {lead.city}
                           </span>
-                          <span className="bg-blue-50 text-blue-700 text-[11px] font-semibold px-2 py-0.5 rounded-md">
+                          <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md">
                             {lead.category}
                           </span>
                         </div>
@@ -784,8 +784,8 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
       {/* Arama Sonucu ve Diyagram Karar Modalı (6. Adım) */}
       {activeCallModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-scale-up">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl border border-slate-200 animate-scale-up max-h-[90vh] overflow-y-auto">
             
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
@@ -865,7 +865,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                 Görüşme Sonucunu Seçiniz (Diyagram Akışı):
               </p>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 
                 {/* 1. Doğrudan Satış -> Satış Havuzu */}
                 <button
@@ -919,7 +919,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                   <span className="text-[11px] font-bold text-purple-700">
                     Ziyaret Yapıldıysa Sonucu İşaretleyin:
                   </span>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => handleOutcomeSubmit('ziyaret_olumlu')}

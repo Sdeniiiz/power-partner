@@ -94,7 +94,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col w-full max-w-full overflow-x-hidden">
       
       {/* Üst Navigasyon Çubuğu */}
       <Navbar
@@ -111,7 +111,7 @@ export default function App() {
       />
 
       {/* Ana İçerik Alanı */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-6 lg:px-8 py-3.5 sm:py-6 min-w-0 max-w-full overflow-x-hidden">
         
         {/* 1-4. ADIM: İŞLETME BULUCU (GOOGLE MAPS - YALNIZCA ADMİN) */}
         {activeTab === 'finder' && isAdmin && (

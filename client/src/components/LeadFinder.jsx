@@ -363,9 +363,9 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
 
       {/* 1. MOD: GOOGLE MAPS TARAMA FORMU */}
       {inputMode === 'maps' && (
-      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
+      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs min-w-0 max-w-full">
         <form onSubmit={handleSearch} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 min-w-0">
 
             
             {/* 1. İlçe Seçimi */}
@@ -657,11 +657,11 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
 
       {/* Arama Sonuçları & Liste Kontrolü (Adım 3 & 4) */}
       {results.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden min-w-0 max-w-full">
 
           
           {/* Sonuç Başlığı & Aksiyon Barı */}
-          <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="p-3.5 sm:p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 min-w-0">
             <div>
               <div className="flex items-center gap-2.5">
                 <h2 className="font-extrabold text-lg text-slate-900">

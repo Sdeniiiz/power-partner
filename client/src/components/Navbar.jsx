@@ -28,25 +28,25 @@ export default function Navbar({
 }) {
   const isAdmin = authUser?.role === 'admin';
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs w-full max-w-full overflow-x-hidden">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-14 sm:h-16 gap-2">
           
           {/* Logo & Slogan */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-blue-200">
-              <Layers className="w-6 h-6" />
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-blue-200 shrink-0">
+              <Layers className="w-4.5 h-4.5 sm:w-6 sm:h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-xl tracking-tight text-slate-900">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className="font-extrabold text-base sm:text-xl tracking-tight text-slate-900">
                   Power<span className="text-blue-600">Partner</span>
                 </span>
-                <span className="bg-blue-50 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full border border-blue-200">
+                <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full border border-blue-200 hidden sm:inline-block">
                   v2.0 CRM
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium hidden sm:block">
+              <p className="text-[11px] text-slate-500 font-medium hidden md:block">
                 Harita Aday Bulucu & İş Dağıtım Sistemi
               </p>
             </div>
@@ -128,20 +128,20 @@ export default function Navbar({
           </nav>
 
           {/* Sağ Alan: Aktif Kullanıcı & Ayarlar */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             {/* Giriş Yapan Hesap Bilgisi */}
-            <div className="flex items-center gap-2 bg-slate-100/90 border border-slate-200/80 rounded-xl px-2 sm:px-2.5 py-1.5 shadow-2xs">
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0 ${
+            <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-100/90 border border-slate-200/80 rounded-xl px-2 py-1 sm:py-1.5 shadow-2xs">
+              <div className={`w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0 ${
                 isAdmin ? 'bg-gradient-to-tr from-rose-500 to-amber-500 shadow-rose-200 shadow-xs' : 'bg-gradient-to-tr from-blue-600 to-indigo-600'
               }`}>
-                {isAdmin ? <Shield className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                {isAdmin ? <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
               </div>
               <div className="flex flex-col text-left">
-                <div className="flex items-center gap-1 sm:gap-1.5">
-                  <span className="text-xs font-black text-slate-800 tracking-tight leading-none max-w-[65px] sm:max-w-[120px] md:max-w-none truncate">
+                <div className="flex items-center gap-1">
+                  <span className="text-[11px] sm:text-xs font-black text-slate-800 tracking-tight leading-none max-w-[65px] sm:max-w-[120px] md:max-w-none truncate">
                     {authUser?.name || 'Kullanıcı'}
                   </span>
-                  <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md tracking-wider leading-none hidden xs:inline-block ${
+                  <span className={`text-[8px] sm:text-[9px] font-bold uppercase px-1 sm:px-1.5 py-0.5 rounded tracking-wider leading-none ${
                     isAdmin 
                       ? 'bg-rose-500 text-white' 
                       : 'bg-indigo-600 text-white'
@@ -149,7 +149,7 @@ export default function Navbar({
                     {isAdmin ? 'YÖNETİCİ' : (authUser?.role || 'PERSONEL')}
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono mt-0.5 leading-none">
+                <span className="text-[9px] sm:text-[10px] text-slate-400 font-mono mt-0.5 leading-none hidden sm:block">
                   @{authUser?.username}
                 </span>
               </div>
@@ -159,12 +159,12 @@ export default function Navbar({
             {isAdmin && (
               <button
                 onClick={onOpenSettings}
-                className="relative p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all border border-slate-200/80 cursor-pointer"
+                className="relative p-1.5 sm:p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all border border-slate-200/80 cursor-pointer shrink-0"
                 title="Yönetim Masası & Sistem Ayarları"
               >
-                <Settings className="w-4.5 h-4.5" />
+                <Settings className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                 {!hasApiKey && (
-                  <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-amber-500 rounded-full ring-2 ring-white animate-ping" />
+                  <span className="absolute top-1 right-1 w-2 sm:w-2.5 h-2 sm:h-2.5 bg-amber-500 rounded-full ring-2 ring-white animate-ping" />
                 )}
               </button>
             )}
@@ -172,10 +172,10 @@ export default function Navbar({
             {/* Çıkış Yap Butonu */}
             <button
               onClick={onLogout}
-              className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all border border-rose-100 cursor-pointer"
+              className="p-1.5 sm:p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all border border-rose-100 cursor-pointer shrink-0"
               title="Çıkış Yap"
             >
-              <LogOut className="w-4.5 h-4.5" />
+              <LogOut className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </button>
           </div>
 
