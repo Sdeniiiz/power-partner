@@ -1,12 +1,12 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const axios = require('axios');
 
 // Ayarları getir
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const rows = db.prepare('SELECT key, value FROM settings').all();
+    const rows = await db.all('SELECT key, value FROM settings');
     const settings = {};
     rows.forEach(r => { settings[r.key] = r.value; });
 
@@ -21,21 +21,21 @@ router.get('/', (req, res) => {
 });
 
 // Ayarları kaydet
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { google_maps_api_key, default_city } = req.body;
 
-    const upsert = db.prepare(`
+    const upsertSql = `
       INSERT INTO settings (key, value) VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `);
+    `;
 
     if (google_maps_api_key !== undefined) {
       const trimmedKey = (google_maps_api_key || '').trim();
-      upsert.run('google_maps_api_key', trimmedKey);
+      await db.run(upsertSql, 'google_maps_api_key', trimmedKey);
     }
     if (default_city !== undefined) {
-      upsert.run('default_city', default_city.trim());
+      await db.run(upsertSql, 'default_city', default_city.trim());
     }
 
     res.json({ success: true, message: 'Ayarlar başarıyla kaydedildi.' });
@@ -119,7 +119,6 @@ router.post('/test-key', async (req, res) => {
     errorDetails.push(`Places API (Legacy): ${errMsg}`);
   }
 
-  // Eğer iki yöntem de hata verdiyse kullanıcıya spesifik rehber sunalım:
   const combinedErrors = errorDetails.join('\n');
   let userFriendlyTip = '';
 
@@ -140,15 +139,15 @@ router.post('/test-key', async (req, res) => {
   });
 });
 
-// JSON Veri Yedeği İndir (Örnekteki exportDataJSON karşılığı)
-router.get('/backup', (req, res) => {
+// JSON Veri Yedeği İndir
+router.get('/backup', async (req, res) => {
   try {
-    const settings = db.prepare('SELECT * FROM settings').all();
-    const teamMembers = db.prepare('SELECT * FROM team_members').all();
-    const categories = db.prepare('SELECT * FROM categories').all();
-    const leads = db.prepare('SELECT * FROM leads').all();
-    const jobs = db.prepare('SELECT * FROM jobs').all();
-    const callLogs = db.prepare('SELECT * FROM call_logs').all();
+    const settings = await db.all('SELECT * FROM settings');
+    const teamMembers = await db.all('SELECT * FROM team_members');
+    const categories = await db.all('SELECT * FROM categories');
+    const leads = await db.all('SELECT * FROM leads');
+    const jobs = await db.all('SELECT * FROM jobs');
+    const callLogs = await db.all('SELECT * FROM call_logs');
 
     const backup = {
       exportDate: new Date().toISOString(),
@@ -169,19 +168,21 @@ router.get('/backup', (req, res) => {
   }
 });
 
-// JSON Veri Yedeği Geri Yükle (Örnekteki importDataJSON karşılığı)
-router.post('/restore', (req, res) => {
+// JSON Veri Yedeği Geri Yükle
+router.post('/restore', async (req, res) => {
   try {
     const data = req.body;
     if (!data || typeof data !== 'object') {
       return res.status(400).json({ error: 'Geçersiz yedek dosyası formatı.' });
     }
 
-    const restoreTransaction = db.transaction(() => {
-      // Leads geri yükleme
-      if (Array.isArray(data.leads) && data.leads.length > 0) {
-        for (const l of data.leads) {
-          const insert = db.prepare(`
+    const batchStmts = [];
+
+    // Leads geri yükleme
+    if (Array.isArray(data.leads) && data.leads.length > 0) {
+      for (const l of data.leads) {
+        batchStmts.push({
+          sql: `
             INSERT OR REPLACE INTO leads (
               id, place_id, name, category, district, city, address,
               phone, raw_phone, phone_type, phone_type_label, is_mobile,
@@ -197,8 +198,8 @@ router.post('/restore', (req, res) => {
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?
             )
-          `);
-          insert.run(
+          `,
+          args: [
             l.id || null, l.place_id || `res_${Date.now()}_${Math.random()}`, l.name, l.category || 'Genel',
             l.district || '', l.city || '', l.address || '',
             l.phone || '', l.raw_phone || '', l.phone_type || 'sabit', l.phone_type_label || 'Sabit',
@@ -209,26 +210,35 @@ router.post('/restore', (req, res) => {
             l.status || 'arama_listesi', l.score || 0, l.retry_date || null,
             typeof l.products === 'object' ? JSON.stringify(l.products) : (l.products || null),
             l.visit_date || null, l.call_notes || '', l.call_count || 0, l.last_called_at || null
-          );
-        }
+          ]
+        });
       }
+    }
 
-      // Jobs geri yükleme
-      if (Array.isArray(data.jobs) && data.jobs.length > 0) {
-        for (const j of data.jobs) {
-          db.prepare(`
+    // Jobs geri yükleme
+    if (Array.isArray(data.jobs) && data.jobs.length > 0) {
+      for (const j of data.jobs) {
+        batchStmts.push({
+          sql: `
             INSERT OR REPLACE INTO jobs (id, lead_id, title, category_id, assigned_member_id, products, status, due_date, notes)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
+          `,
+          args: [
             j.id || null, j.lead_id, j.title, j.category_id || null, j.assigned_member_id || null,
             typeof j.products === 'object' ? JSON.stringify(j.products) : (j.products || null),
             j.status || 'devam_ediyor', j.due_date || null, j.notes || ''
-          );
-        }
+          ]
+        });
       }
-    });
+    }
 
-    restoreTransaction();
+    if (batchStmts.length > 0) {
+      // 50'şerli batch grupları halinde çalıştıralım
+      for (let i = 0; i < batchStmts.length; i += 50) {
+        const chunk = batchStmts.slice(i, i + 50);
+        await db.batch(chunk, 'write');
+      }
+    }
 
     res.json({ success: true, message: 'Yedek başarıyla veritabanına aktarıldı.' });
   } catch (err) {
@@ -237,4 +247,3 @@ router.post('/restore', (req, res) => {
 });
 
 module.exports = router;
-

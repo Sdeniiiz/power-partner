@@ -14,7 +14,7 @@ class GoogleMapsService {
    * İlçe ve Kategoriye göre bölgedeki TÜM işletmeleri arar
    */
   async searchPlaces({ district, category, city = 'İstanbul', query = '', deepSearch = true }) {
-    const rawApiKey = this.getApiKey();
+    const rawApiKey = await this.getApiKey();
     const apiKey = rawApiKey ? rawApiKey.trim() : '';
 
     const baseQuery = query || `${district} ${city} ${category}`.trim();

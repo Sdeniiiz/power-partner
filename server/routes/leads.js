@@ -1,11 +1,11 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const GoogleMapsService = require('../services/googleMapsService');
 const { analyzePhoneNumber } = require('../services/phoneAnalyzer');
 
-const getApiKey = () => {
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'google_maps_api_key'").get();
+const getApiKey = async () => {
+  const row = await db.get("SELECT value FROM settings WHERE key = 'google_maps_api_key'");
   return row?.value || '';
 };
 
@@ -35,7 +35,7 @@ router.post('/search', async (req, res) => {
 });
 
 // Arama sonuçlarından seçilenleri veritabanına aktar (Arama Listesine ekle)
-router.post('/import', (req, res) => {
+router.post('/import', async (req, res) => {
   try {
     const { places } = req.body;
 
@@ -43,7 +43,7 @@ router.post('/import', (req, res) => {
       return res.status(400).json({ error: 'Eklenecek işletme listesi boş.' });
     }
 
-    const insertLead = db.prepare(`
+    const insertSql = `
       INSERT INTO leads (
         place_id, name, category, district, city, address,
         phone, raw_phone, phone_type, phone_type_label, is_mobile,
@@ -63,15 +63,16 @@ router.post('/import', (req, res) => {
         phone = COALESCE(excluded.phone, leads.phone),
         website = COALESCE(excluded.website, leads.website),
         updated_at = CURRENT_TIMESTAMP
-    `);
+    `;
 
-    const insertMany = db.transaction((items) => {
-      let added = 0;
-      for (const item of items) {
-        const phoneInfo = analyzePhoneNumber(item.raw_phone || item.phone || '');
-        const pId = item.place_id || `gen_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const stmts = [];
+    for (const item of places) {
+      const phoneInfo = analyzePhoneNumber(item.raw_phone || item.phone || '');
+      const pId = item.place_id || `gen_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-        insertLead.run(
+      stmts.push({
+        sql: insertSql,
+        args: [
           pId,
           item.name,
           item.category || 'Genel',
@@ -94,35 +95,38 @@ router.post('/import', (req, res) => {
           item.maps_url || '',
           item.lat || null,
           item.lng || null
-        );
-        added++;
-      }
-      return added;
-    });
+        ]
+      });
+    }
 
-    const count = insertMany(places);
-    res.json({ success: true, count, message: `${count} işletme arama listesine kaydedildi.` });
+    for (let i = 0; i < stmts.length; i += 50) {
+      await db.batch(stmts.slice(i, i + 50), 'write');
+    }
+
+    res.json({ success: true, count: stmts.length, message: `${stmts.length} işletme arama listesine kaydedildi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // İlçe ve Sektör/Kategori filtre seçeneklerini getir
-router.get('/meta/filters', (req, res) => {
+router.get('/meta/filters', async (req, res) => {
   try {
-    const districts = db.prepare(`
+    const districtRows = await db.all(`
       SELECT DISTINCT district 
       FROM leads 
       WHERE district IS NOT NULL AND TRIM(district) != '' 
       ORDER BY district ASC
-    `).all().map(r => r.district);
+    `);
+    const districts = districtRows.map(r => r.district);
 
-    const categories = db.prepare(`
+    const categoryRows = await db.all(`
       SELECT DISTINCT category 
       FROM leads 
       WHERE category IS NOT NULL AND TRIM(category) != '' 
       ORDER BY category ASC
-    `).all().map(r => r.category);
+    `);
+    const categories = categoryRows.map(r => r.category);
 
     res.json({ districts, categories });
   } catch (err) {
@@ -131,7 +135,7 @@ router.get('/meta/filters', (req, res) => {
 });
 
 // İşletmeleri listele ve filtrele
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { 
       status, district, category, phone_type, search,
@@ -187,10 +191,10 @@ router.get('/', (req, res) => {
     query += ' ORDER BY score DESC, id DESC LIMIT ?';
     params.push(Number(limit));
 
-    const rows = db.prepare(query).all(...params);
+    const rows = await db.all(query, ...params);
 
     // İstatistikler (Diyagram aşamaları bazında özet)
-    const stats = db.prepare(`
+    const stats = await db.get(`
       SELECT
         COUNT(*) as total,
         SUM(CASE WHEN status = 'arama_listesi' THEN 1 ELSE 0 END) as in_queue,
@@ -200,7 +204,7 @@ router.get('/', (req, res) => {
         SUM(CASE WHEN status = 'is_dagitildi' THEN 1 ELSE 0 END) as is_dagitildi,
         SUM(CASE WHEN status = 'iletisimsiz' THEN 1 ELSE 0 END) as iletisimsiz
       FROM leads
-    `).get();
+    `);
 
     res.json({ data: rows, stats });
   } catch (err) {
@@ -209,19 +213,19 @@ router.get('/', (req, res) => {
 });
 
 // Tek işletme ve arama geçmişi
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const lead = await db.get('SELECT * FROM leads WHERE id = ?', req.params.id);
     if (!lead) return res.status(404).json({ error: 'İşletme bulunamadı' });
 
-    const logs = db.prepare('SELECT * FROM call_logs WHERE lead_id = ? ORDER BY created_at DESC').all(lead.id);
-    const jobs = db.prepare(`
+    const logs = await db.all('SELECT * FROM call_logs WHERE lead_id = ? ORDER BY created_at DESC', lead.id);
+    const jobs = await db.all(`
       SELECT j.*, c.name as category_name, c.color as category_color, m.name as member_name, m.color as member_color
       FROM jobs j
       LEFT JOIN categories c ON j.category_id = c.id
       LEFT JOIN team_members m ON j.assigned_member_id = m.id
       WHERE j.lead_id = ?
-    `).all(lead.id);
+    `, lead.id);
 
     res.json({ lead, logs, jobs });
   } catch (err) {
@@ -230,12 +234,12 @@ router.get('/:id', (req, res) => {
 });
 
 // Arama sonucunu kaydet ve durumu güncelle (Diyagram akışı)
-router.post('/:id/call', (req, res) => {
+router.post('/:id/call', async (req, res) => {
   try {
     const { outcome, notes, caller_name, visit_date, score, retry_date, products } = req.body;
     const leadId = req.params.id;
 
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+    const lead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
     if (!lead) return res.status(404).json({ error: 'İşletme bulunamadı' });
 
     let newStatus = lead.status;
@@ -247,15 +251,15 @@ router.post('/:id/call', (req, res) => {
     else if (outcome === 'satis') newStatus = 'satis_havuzu';
 
     // Arama günlüğü ekle
-    db.prepare(`
+    await db.run(`
       INSERT INTO call_logs (lead_id, outcome, caller_name, notes)
       VALUES (?, ?, ?, ?)
-    `).run(leadId, outcome, caller_name || 'Operatör', notes || '');
+    `, leadId, outcome, caller_name || 'Operatör', notes || '');
 
     // Lead'i güncelle
     const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
 
-    db.prepare(`
+    await db.run(`
       UPDATE leads
       SET
         status = ?,
@@ -268,7 +272,7 @@ router.post('/:id/call', (req, res) => {
         last_called_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(
+    `,
       newStatus, 
       notes || null, 
       visit_date || null, visit_date || null,
@@ -278,7 +282,7 @@ router.post('/:id/call', (req, res) => {
       leadId
     );
 
-    const updatedLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+    const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
     res.json({ success: true, lead: updatedLead, message: 'Arama kaydı ve durum güncellendi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -286,12 +290,12 @@ router.post('/:id/call', (req, res) => {
 });
 
 // Tek işletme güncelle (Not, Puan, vb. hızlı düzenleme)
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { call_notes, score, retry_date, status, category, district, city } = req.body;
     const leadId = req.params.id;
 
-    db.prepare(`
+    await db.run(`
       UPDATE leads
       SET
         call_notes = COALESCE(?, call_notes),
@@ -303,7 +307,7 @@ router.put('/:id', (req, res) => {
         city = COALESCE(?, city),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(
+    `,
       call_notes !== undefined ? call_notes : null,
       score !== undefined ? Number(score) : null,
       retry_date !== undefined ? retry_date : null,
@@ -314,7 +318,7 @@ router.put('/:id', (req, res) => {
       leadId
     );
 
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+    const updated = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
     res.json({ success: true, data: updated });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -322,9 +326,9 @@ router.put('/:id', (req, res) => {
 });
 
 // Kampanya Listesi (İlçe - Sektör Grupları)
-router.get('/campaigns/summary', (req, res) => {
+router.get('/campaigns/summary', async (req, res) => {
   try {
-    const rows = db.prepare(`
+    const rows = await db.all(`
       SELECT 
         district, 
         category,
@@ -334,7 +338,7 @@ router.get('/campaigns/summary', (req, res) => {
       FROM leads
       GROUP BY district, category
       ORDER BY total DESC
-    `).all();
+    `);
 
     res.json({ data: rows });
   } catch (err) {
@@ -342,19 +346,19 @@ router.get('/campaigns/summary', (req, res) => {
   }
 });
 
-// Kampanya Toplu Yeniden Adlandır (Örnekteki Kampanya Yönetimi)
-router.put('/campaigns/rename', (req, res) => {
+// Kampanya Toplu Yeniden Adlandır
+router.put('/campaigns/rename', async (req, res) => {
   try {
     const { oldDistrict, oldCategory, newDistrict, newCategory } = req.body;
     if (!oldDistrict || !oldCategory || !newDistrict || !newCategory) {
       return res.status(400).json({ error: 'Eski ve yeni ilçe/kategori değerleri zorunludur.' });
     }
 
-    const result = db.prepare(`
+    const result = await db.run(`
       UPDATE leads
       SET district = ?, category = ?, updated_at = CURRENT_TIMESTAMP
       WHERE district = ? AND category = ?
-    `).run(newDistrict.trim(), newCategory.trim(), oldDistrict.trim(), oldCategory.trim());
+    `, newDistrict.trim(), newCategory.trim(), oldDistrict.trim(), oldCategory.trim());
 
     res.json({ success: true, count: result.changes, message: `${result.changes} işletme güncellendi.` });
   } catch (err) {
@@ -363,21 +367,21 @@ router.put('/campaigns/rename', (req, res) => {
 });
 
 // Kampanya Toplu Sil
-router.delete('/campaigns/delete', (req, res) => {
+router.delete('/campaigns/delete', async (req, res) => {
   try {
     const { district, category } = req.body;
     if (!district || !category) {
       return res.status(400).json({ error: 'Silinecek ilçe ve kategori zorunludur.' });
     }
 
-    // İlgili lead id'lerini bulup bağlı tabloları da temizleyelim
-    const leadIds = db.prepare('SELECT id FROM leads WHERE district = ? AND category = ?').all(district, category).map(r => r.id);
+    const leadRows = await db.all('SELECT id FROM leads WHERE district = ? AND category = ?', district, category);
+    const leadIds = leadRows.map(r => r.id);
     
     if (leadIds.length > 0) {
       const placeholders = leadIds.map(() => '?').join(',');
-      db.prepare(`DELETE FROM call_logs WHERE lead_id IN (${placeholders})`).run(...leadIds);
-      db.prepare(`DELETE FROM jobs WHERE lead_id IN (${placeholders})`).run(...leadIds);
-      const delResult = db.prepare(`DELETE FROM leads WHERE id IN (${placeholders})`).run(...leadIds);
+      await db.run(`DELETE FROM call_logs WHERE lead_id IN (${placeholders})`, ...leadIds);
+      await db.run(`DELETE FROM jobs WHERE lead_id IN (${placeholders})`, ...leadIds);
+      const delResult = await db.run(`DELETE FROM leads WHERE id IN (${placeholders})`, ...leadIds);
       return res.json({ success: true, count: delResult.changes, message: `${delResult.changes} işletme ve bağlı kayıtlar silindi.` });
     }
 
@@ -387,8 +391,8 @@ router.delete('/campaigns/delete', (req, res) => {
   }
 });
 
-// Toplu veya Tekil Durum Değiştir / Kuyruğa Geri Döndür (Örn: Mutlak Olumsuz / İletişimsiz -> Arama Listesi)
-router.post('/batch-status', (req, res) => {
+// Toplu veya Tekil Durum Değiştir / Kuyruğa Geri Döndür
+router.post('/batch-status', async (req, res) => {
   try {
     const { leadIds, status } = req.body;
     if (!Array.isArray(leadIds) || leadIds.length === 0) {
@@ -396,11 +400,11 @@ router.post('/batch-status', (req, res) => {
     }
     const targetStatus = status || 'arama_listesi';
     const placeholders = leadIds.map(() => '?').join(',');
-    const result = db.prepare(`
+    const result = await db.run(`
       UPDATE leads 
       SET status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id IN (${placeholders})
-    `).run(targetStatus, ...leadIds);
+    `, targetStatus, ...leadIds);
 
     res.json({
       success: true,
@@ -413,13 +417,13 @@ router.post('/batch-status', (req, res) => {
 });
 
 // Diyagramdaki Döngü: Tüm İletişimsizlikleri tekrar Günlük Arama Listesine geri aktar
-router.post('/requeue-unreachable', (req, res) => {
+router.post('/requeue-unreachable', async (req, res) => {
   try {
-    const result = db.prepare(`
+    const result = await db.run(`
       UPDATE leads
       SET status = 'arama_listesi', updated_at = CURRENT_TIMESTAMP
       WHERE status = 'iletisimsiz'
-    `).run();
+    `);
 
     res.json({
       success: true,
@@ -432,14 +436,15 @@ router.post('/requeue-unreachable', (req, res) => {
 });
 
 // Admin: Günlük Arama Listesini Temizle (Sadece aranmamış 'arama_listesi' durumundakiler)
-router.post('/admin/clear-queue', (req, res) => {
+router.post('/admin/clear-queue', async (req, res) => {
   try {
-    const queueLeads = db.prepare("SELECT id FROM leads WHERE status = 'arama_listesi'").all().map(r => r.id);
+    const queueRows = await db.all("SELECT id FROM leads WHERE status = 'arama_listesi'");
+    const queueLeads = queueRows.map(r => r.id);
     if (queueLeads.length > 0) {
       const placeholders = queueLeads.map(() => '?').join(',');
-      db.prepare(`DELETE FROM call_logs WHERE lead_id IN (${placeholders})`).run(...queueLeads);
-      db.prepare(`DELETE FROM jobs WHERE lead_id IN (${placeholders})`).run(...queueLeads);
-      const delResult = db.prepare(`DELETE FROM leads WHERE id IN (${placeholders})`).run(...queueLeads);
+      await db.run(`DELETE FROM call_logs WHERE lead_id IN (${placeholders})`, ...queueLeads);
+      await db.run(`DELETE FROM jobs WHERE lead_id IN (${placeholders})`, ...queueLeads);
+      const delResult = await db.run(`DELETE FROM leads WHERE id IN (${placeholders})`, ...queueLeads);
       return res.json({ success: true, count: delResult.changes, message: `${delResult.changes} bekleyen işletme arama listesinden temizlendi.` });
     }
     res.json({ success: true, count: 0, message: 'Arama listesinde temizlenecek işletme yok.' });
@@ -449,11 +454,11 @@ router.post('/admin/clear-queue', (req, res) => {
 });
 
 // Admin: Tüm İşletmeleri ve Arama Kayıtlarını Sıfırla
-router.post('/admin/clear-all', (req, res) => {
+router.post('/admin/clear-all', async (req, res) => {
   try {
-    db.prepare('DELETE FROM call_logs').run();
-    db.prepare('DELETE FROM jobs').run();
-    const result = db.prepare('DELETE FROM leads').run();
+    await db.run('DELETE FROM call_logs');
+    await db.run('DELETE FROM jobs');
+    const result = await db.run('DELETE FROM leads');
     res.json({ success: true, count: result.changes, message: `Tüm sistem sıfırlandı: ${result.changes} işletme silindi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -461,11 +466,11 @@ router.post('/admin/clear-all', (req, res) => {
 });
 
 // Lead silme
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    db.prepare('DELETE FROM call_logs WHERE lead_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM jobs WHERE lead_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM leads WHERE id = ?').run(req.params.id);
+    await db.run('DELETE FROM call_logs WHERE lead_id = ?', req.params.id);
+    await db.run('DELETE FROM jobs WHERE lead_id = ?', req.params.id);
+    await db.run('DELETE FROM leads WHERE id = ?', req.params.id);
     res.json({ success: true, message: 'İşletme silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -473,4 +478,3 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
-

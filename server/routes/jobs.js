@@ -1,9 +1,9 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
 // Tüm işleri listele (Kategori, Çalışan ve İşletme bilgileriyle birlikte)
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { member_id, category_id, status } = req.query;
 
@@ -44,7 +44,7 @@ router.get('/', (req, res) => {
 
     query += ' ORDER BY j.due_date ASC, j.id DESC';
 
-    const jobs = db.prepare(query).all(...params);
+    const jobs = await db.all(query, ...params);
     res.json({ data: jobs });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -52,7 +52,7 @@ router.get('/', (req, res) => {
 });
 
 // Satış Havuzundan İş Dağıtımı Yap (Diyagram: Satış Havuzu -> İş Dağıtımı -> Kategori & Çalışan)
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { lead_id, category_id, assigned_member_id, title, due_date, notes, products } = req.body;
 
@@ -66,7 +66,7 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'Lütfen teslim tarihi belirleyiniz.' });
     }
 
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead_id);
+    const lead = await db.get('SELECT * FROM leads WHERE id = ?', lead_id);
     if (!lead) {
       return res.status(404).json({ error: 'İşletme bulunamadı.' });
     }
@@ -74,12 +74,13 @@ router.post('/', (req, res) => {
     const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
 
     // İşi oluştur
-    const insertJob = db.prepare(`
+    const insertSql = `
       INSERT INTO jobs (lead_id, category_id, assigned_member_id, title, due_date, notes, products, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'devam_ediyor')
-    `);
+    `;
 
-    const result = insertJob.run(
+    const result = await db.run(
+      insertSql,
       lead_id,
       category_id || null,
       assigned_member_id || null,
@@ -90,20 +91,20 @@ router.post('/', (req, res) => {
     );
 
     // Müşteri adayının durumunu 'is_dagitildi' yap
-    db.prepare(`
+    await db.run(`
       UPDATE leads
       SET status = 'is_dagitildi', updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(lead_id);
+    `, lead_id);
 
-    const createdJob = db.prepare(`
+    const createdJob = await db.get(`
       SELECT j.*, l.name as lead_name, c.name as category_name, m.name as member_name
       FROM jobs j
       JOIN leads l ON j.lead_id = l.id
       LEFT JOIN categories c ON j.category_id = c.id
       LEFT JOIN team_members m ON j.assigned_member_id = m.id
       WHERE j.id = ?
-    `).get(result.lastInsertRowid);
+    `, result.lastInsertRowid);
 
     res.json({
       success: true,
@@ -116,14 +117,14 @@ router.post('/', (req, res) => {
 });
 
 // İş Durumunu veya Teslim Tarihini Güncelle
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { status, due_date, notes, assigned_member_id, products } = req.body;
     const jobId = req.params.id;
 
     const productsStr = products !== undefined ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
 
-    db.prepare(`
+    const updateSql = `
       UPDATE jobs
       SET
         status = COALESCE(?, status),
@@ -133,10 +134,11 @@ router.put('/:id', (req, res) => {
         products = CASE WHEN ? IS NOT NULL THEN ? ELSE products END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(status || null, due_date || null, notes || null, assigned_member_id || null, productsStr, productsStr, jobId);
+    `;
 
+    await db.run(updateSql, status || null, due_date || null, notes || null, assigned_member_id || null, productsStr, productsStr, jobId);
 
-    const updated = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+    const updated = await db.get('SELECT * FROM jobs WHERE id = ?', jobId);
     res.json({ success: true, data: updated, message: 'İş güncellendi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -144,9 +146,9 @@ router.put('/:id', (req, res) => {
 });
 
 // İşi Sil
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    db.prepare('DELETE FROM jobs WHERE id = ?').run(req.params.id);
+    await db.run('DELETE FROM jobs WHERE id = ?', req.params.id);
     res.json({ success: true, message: 'İş silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });

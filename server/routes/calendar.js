@@ -1,9 +1,9 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
 // Takvim etkinliklerini getir (Teslim Tarihleri + Randevu/Ziyaret Tarihleri)
-router.get('/events', (req, res) => {
+router.get('/events', async (req, res) => {
   try {
     const { member_id, month, year } = req.query;
 
@@ -38,7 +38,7 @@ router.get('/events', (req, res) => {
       jobParams.push(member_id);
     }
 
-    const jobEvents = db.prepare(jobsQuery).all(...jobParams);
+    const jobEvents = await db.all(jobsQuery, ...jobParams);
 
     // 2. Randevu / Ziyaret Tarihleri (Leads with visit_date)
     let visitQuery = `
@@ -61,7 +61,7 @@ router.get('/events', (req, res) => {
       WHERE l.visit_date IS NOT NULL AND l.visit_date != '' AND l.status = 'randevu'
     `;
 
-    const visitEvents = db.prepare(visitQuery).all();
+    const visitEvents = await db.all(visitQuery);
 
     // İki kaynağı birleştirip tarihe göre sıralayalım
     const allEvents = [...jobEvents, ...visitEvents].sort((a, b) => {

@@ -1,15 +1,15 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
 const ROLE_COLORS = {
-  'Soğuk Arama': '#0284c7', // Mavi/Sky
-  'Saha Satış': '#16a34a', // Yeşil
-  'Yazılım': '#8b5cf6', // Mor
-  'Baskı / İmalat': '#ea580c', // Turuncu
-  'Dijital Ürünler': '#0d9488', // Teal
-  'Müdür': '#b45309', // Altın/Amber
-  'admin': '#e11d48', // Gül/Kırmızı
+  'Soğuk Arama': '#0284c7',
+  'Saha Satış': '#16a34a',
+  'Yazılım': '#8b5cf6',
+  'Baskı / İmalat': '#ea580c',
+  'Dijital Ürünler': '#0d9488',
+  'Müdür': '#b45309',
+  'admin': '#e11d48',
   'Yönetici (Admin)': '#e11d48'
 };
 
@@ -23,7 +23,7 @@ function getRoleColor(role) {
 }
 
 // Tüm rolleri listele (Varsayılan + Kayıtlı Özel Roller)
-router.get('/roles', (req, res) => {
+router.get('/roles', async (req, res) => {
   try {
     const defaultRoles = [
       'Soğuk Arama',
@@ -35,13 +35,14 @@ router.get('/roles', (req, res) => {
       'admin'
     ];
 
-    const dbRoles = db.prepare(`
+    const dbRolesRows = await db.all(`
       SELECT DISTINCT role FROM users WHERE role IS NOT NULL AND TRIM(role) != ''
       UNION
       SELECT DISTINCT role FROM team_members WHERE role IS NOT NULL AND TRIM(role) != ''
-    `).all().map(r => r.role);
+    `);
+    const dbRoles = dbRolesRows.map(r => r.role);
 
-    const savedCustom = db.prepare("SELECT value FROM settings WHERE key = 'custom_roles'").get();
+    const savedCustom = await db.get("SELECT value FROM settings WHERE key = 'custom_roles'");
     let customList = [];
     try {
       if (savedCustom?.value) customList = JSON.parse(savedCustom.value);
@@ -57,7 +58,7 @@ router.get('/roles', (req, res) => {
 });
 
 // Yeni özel rol ekle
-router.post('/roles', (req, res) => {
+router.post('/roles', async (req, res) => {
   try {
     const { role } = req.body;
     if (!role || !role.trim()) {
@@ -65,7 +66,7 @@ router.post('/roles', (req, res) => {
     }
     const cleanRole = role.trim();
 
-    const savedCustom = db.prepare("SELECT value FROM settings WHERE key = 'custom_roles'").get();
+    const savedCustom = await db.get("SELECT value FROM settings WHERE key = 'custom_roles'");
     let customList = [];
     try {
       if (savedCustom?.value) customList = JSON.parse(savedCustom.value);
@@ -73,7 +74,10 @@ router.post('/roles', (req, res) => {
 
     if (!customList.includes(cleanRole)) {
       customList.push(cleanRole);
-      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('custom_roles', ?)").run(JSON.stringify(customList));
+      await db.run(`
+        INSERT INTO settings (key, value) VALUES ('custom_roles', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `, JSON.stringify(customList));
     }
 
     res.json({ success: true, role: cleanRole, message: `"${cleanRole}" rolü başarıyla kaydedildi.` });
@@ -83,9 +87,9 @@ router.post('/roles', (req, res) => {
 });
 
 // Ekip üyelerini listele (iş sayıları ile)
-router.get('/members', (req, res) => {
+router.get('/members', async (req, res) => {
   try {
-    const members = db.prepare(`
+    const members = await db.all(`
       SELECT
         m.*,
         COUNT(CASE WHEN j.status != 'tamamlandi' THEN 1 END) as active_jobs,
@@ -94,7 +98,7 @@ router.get('/members', (req, res) => {
       LEFT JOIN jobs j ON m.id = j.assigned_member_id
       GROUP BY m.id
       ORDER BY m.id ASC
-    `).all();
+    `);
 
     res.json({ data: members });
   } catch (err) {
@@ -103,7 +107,7 @@ router.get('/members', (req, res) => {
 });
 
 // Yeni ekip üyesi ekle (users tablosu ile tam senkron)
-router.post('/members', (req, res) => {
+router.post('/members', async (req, res) => {
   try {
     const { name, role, email, phone, color, password, username } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim gereklidir.' });
@@ -111,26 +115,26 @@ router.post('/members', (req, res) => {
     const finalRole = role || 'Soğuk Arama';
     const memberColor = color || getRoleColor(finalRole);
 
-    const result = db.prepare(`
+    const result = await db.run(`
       INSERT INTO team_members (name, role, email, phone, color)
       VALUES (?, ?, ?, ?, ?)
-    `).run(name.trim(), finalRole, email || '', phone || '', memberColor);
+    `, name.trim(), finalRole, email || '', phone || '', memberColor);
 
     // users tablosuna da ekle (otomatik giriş hesabı)
     const baseUsername = (username || name).trim().toLowerCase().replace(/[^a-z0-9]/g, '') || `user${result.lastInsertRowid}`;
     let finalUsername = baseUsername;
     let count = 1;
-    while (db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(finalUsername)) {
+    while (await db.get('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', finalUsername)) {
       finalUsername = `${baseUsername}${count++}`;
     }
 
     const userRole = finalRole === 'Yönetici (Admin)' ? 'admin' : finalRole;
-    db.prepare(`
+    await db.run(`
       INSERT INTO users (username, password, name, role, person)
       VALUES (?, ?, ?, ?, ?)
-    `).run(finalUsername, password ? password.trim() : '123', name.trim(), userRole, name.trim());
+    `, finalUsername, password ? password.trim() : '123', name.trim(), userRole, name.trim());
 
-    const created = db.prepare('SELECT * FROM team_members WHERE id = ?').get(result.lastInsertRowid);
+    const created = await db.get('SELECT * FROM team_members WHERE id = ?', result.lastInsertRowid);
     res.json({ success: true, data: created });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -138,20 +142,20 @@ router.post('/members', (req, res) => {
 });
 
 // Ekip üyesi sil (users tablosundan da temizle)
-router.delete('/members/:id', (req, res) => {
+router.delete('/members/:id', async (req, res) => {
   try {
     const memberId = req.params.id;
-    const member = db.prepare('SELECT * FROM team_members WHERE id = ?').get(memberId);
+    const member = await db.get('SELECT * FROM team_members WHERE id = ?', memberId);
     if (member) {
-      const u = db.prepare('SELECT id, username FROM users WHERE LOWER(name) = LOWER(?)').get(member.name.trim());
+      const u = await db.get('SELECT id, username FROM users WHERE LOWER(name) = LOWER(?)', member.name.trim());
       if (u && u.username.toLowerCase() !== 'admin') {
-        db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
+        await db.run('DELETE FROM users WHERE id = ?', u.id);
       }
     }
     // Bağlı işleri boşa çıkar veya sil
-    db.prepare('UPDATE jobs SET assigned_member_id = NULL WHERE assigned_member_id = ?').run(memberId);
-    db.prepare('UPDATE categories SET default_member_id = NULL WHERE default_member_id = ?').run(memberId);
-    db.prepare('DELETE FROM team_members WHERE id = ?').run(memberId);
+    await db.run('UPDATE jobs SET assigned_member_id = NULL WHERE assigned_member_id = ?', memberId);
+    await db.run('UPDATE categories SET default_member_id = NULL WHERE default_member_id = ?', memberId);
+    await db.run('DELETE FROM team_members WHERE id = ?', memberId);
     res.json({ success: true, message: 'Personel silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -159,9 +163,9 @@ router.delete('/members/:id', (req, res) => {
 });
 
 // Kategorileri listele
-router.get('/categories', (req, res) => {
+router.get('/categories', async (req, res) => {
   try {
-    const categories = db.prepare(`
+    const categories = await db.all(`
       SELECT
         c.*,
         m.name as default_member_name,
@@ -171,7 +175,7 @@ router.get('/categories', (req, res) => {
       LEFT JOIN jobs j ON c.id = j.category_id
       GROUP BY c.id
       ORDER BY c.id ASC
-    `).all();
+    `);
 
     res.json({ data: categories });
   } catch (err) {
@@ -180,17 +184,17 @@ router.get('/categories', (req, res) => {
 });
 
 // Yeni kategori ekle
-router.post('/categories', (req, res) => {
+router.post('/categories', async (req, res) => {
   try {
     const { name, description, default_member_id, color } = req.body;
     if (!name) return res.status(400).json({ error: 'Kategori adı gereklidir.' });
 
-    const result = db.prepare(`
+    const result = await db.run(`
       INSERT INTO categories (name, description, default_member_id, color)
       VALUES (?, ?, ?, ?)
-    `).run(name, description || '', default_member_id || null, color || '#6366f1');
+    `, name, description || '', default_member_id || null, color || '#6366f1');
 
-    const created = db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid);
+    const created = await db.get('SELECT * FROM categories WHERE id = ?', result.lastInsertRowid);
     res.json({ success: true, data: created });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -202,18 +206,18 @@ router.post('/categories', (req, res) => {
 // ==========================================
 
 // Giriş Yap (Login)
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: 'Kullanıcı adı ve şifre zorunludur.' });
     }
 
-    const user = db.prepare(`
+    const user = await db.get(`
       SELECT id, username, name, role, person, password 
       FROM users 
       WHERE LOWER(username) = LOWER(?)
-    `).get(username.trim());
+    `, username.trim());
 
     if (!user || user.password !== password.trim()) {
       return res.status(401).json({ error: 'Kullanıcı adı veya şifre hatalı.' });
@@ -228,9 +232,9 @@ router.post('/login', (req, res) => {
 });
 
 // Tüm kullanıcıları listele (Admin için)
-router.get('/users', (req, res) => {
+router.get('/users', async (req, res) => {
   try {
-    const users = db.prepare('SELECT id, username, name, role, person, created_at FROM users ORDER BY id ASC').all();
+    const users = await db.all('SELECT id, username, name, role, person, created_at FROM users ORDER BY id ASC');
     res.json({ data: users });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -238,7 +242,7 @@ router.get('/users', (req, res) => {
 });
 
 // Yeni kullanıcı oluştur (Admin için)
-router.post('/users', (req, res) => {
+router.post('/users', async (req, res) => {
   try {
     const { username, password, name, role, person } = req.body;
     if (!username || !password || !name) {
@@ -246,7 +250,7 @@ router.post('/users', (req, res) => {
     }
 
     const trimmedUser = username.trim().toLowerCase();
-    const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(trimmedUser);
+    const existing = await db.get('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', trimmedUser);
     if (existing) {
       return res.status(400).json({ error: 'Bu kullanıcı adı zaten kullanılıyor.' });
     }
@@ -255,22 +259,20 @@ router.post('/users', (req, res) => {
     const displayRole = finalRole === 'admin' ? 'Yönetici (Admin)' : finalRole;
     const color = getRoleColor(finalRole);
 
-    const result = db.prepare(`
+    const result = await db.run(`
       INSERT INTO users (username, password, name, role, person)
       VALUES (?, ?, ?, ?, ?)
-    `).run(trimmedUser, password.trim(), name.trim(), finalRole, person || name.trim());
+    `, trimmedUser, password.trim(), name.trim(), finalRole, person || name.trim());
 
     // Otomatik olarak team_members tablosuna da ekleyelim (eğer yoksa) veya güncelleyelim
-    const existingMember = db.prepare('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)').get(name.trim());
+    const existingMember = await db.get('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)', name.trim());
     if (!existingMember) {
-      db.prepare('INSERT INTO team_members (name, role, color) VALUES (?, ?, ?)')
-        .run(name.trim(), displayRole, color);
+      await db.run('INSERT INTO team_members (name, role, color) VALUES (?, ?, ?)', name.trim(), displayRole, color);
     } else {
-      db.prepare('UPDATE team_members SET role = ?, color = ? WHERE id = ?')
-        .run(displayRole, color, existingMember.id);
+      await db.run('UPDATE team_members SET role = ?, color = ? WHERE id = ?', displayRole, color, existingMember.id);
     }
 
-    const created = db.prepare('SELECT id, username, name, role, person FROM users WHERE id = ?').get(result.lastInsertRowid);
+    const created = await db.get('SELECT id, username, name, role, person FROM users WHERE id = ?', result.lastInsertRowid);
     res.json({ success: true, data: created, message: 'Personel / kullanıcı başarıyla oluşturuldu.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -278,7 +280,7 @@ router.post('/users', (req, res) => {
 });
 
 // Kullanıcı Şifre Değiştir (Yönetici veya kullanıcının kendisi)
-router.put('/users/:id/password', (req, res) => {
+router.put('/users/:id/password', async (req, res) => {
   try {
     const userId = req.params.id;
     const { newPassword } = req.body;
@@ -286,10 +288,10 @@ router.put('/users/:id/password', (req, res) => {
       return res.status(400).json({ error: 'Yeni şifre boş olamaz.' });
     }
 
-    const user = db.prepare('SELECT id, username, name FROM users WHERE id = ?').get(userId);
+    const user = await db.get('SELECT id, username, name FROM users WHERE id = ?', userId);
     if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
 
-    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(newPassword.trim(), userId);
+    await db.run('UPDATE users SET password = ? WHERE id = ?', newPassword.trim(), userId);
     res.json({ success: true, message: `${user.name} kullanıcısının şifresi başarıyla güncellendi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -297,10 +299,10 @@ router.put('/users/:id/password', (req, res) => {
 });
 
 // Kullanıcı sil (Admin için)
-router.delete('/users/:id', (req, res) => {
+router.delete('/users/:id', async (req, res) => {
   try {
     const userId = req.params.id;
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    const user = await db.get('SELECT * FROM users WHERE id = ?', userId);
     if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
 
     if (user.username.toLowerCase() === 'admin') {
@@ -308,14 +310,14 @@ router.delete('/users/:id', (req, res) => {
     }
 
     // team_members'dan da temizle
-    const member = db.prepare('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)').get(user.name.trim());
+    const member = await db.get('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)', user.name.trim());
     if (member) {
-      db.prepare('UPDATE jobs SET assigned_member_id = NULL WHERE assigned_member_id = ?').run(member.id);
-      db.prepare('UPDATE categories SET default_member_id = NULL WHERE default_member_id = ?').run(member.id);
-      db.prepare('DELETE FROM team_members WHERE id = ?').run(member.id);
+      await db.run('UPDATE jobs SET assigned_member_id = NULL WHERE assigned_member_id = ?', member.id);
+      await db.run('UPDATE categories SET default_member_id = NULL WHERE default_member_id = ?', member.id);
+      await db.run('DELETE FROM team_members WHERE id = ?', member.id);
     }
 
-    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    await db.run('DELETE FROM users WHERE id = ?', userId);
     res.json({ success: true, message: `${user.name} personeli ve kullanıcı hesabı silindi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -323,4 +325,3 @@ router.delete('/users/:id', (req, res) => {
 });
 
 module.exports = router;
-
