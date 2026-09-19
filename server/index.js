@@ -53,4 +53,21 @@ app.use((req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 PowerPartner Backend Sunucusu http://localhost:${PORT} üzerinde çalışıyor.`);
+
+  // Render Keep-Alive Ping (Uyku modunu engellemek için her 10 dakikada bir ping)
+  const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || process.env.KEEP_ALIVE_URL;
+  if (keepAliveUrl) {
+    const axios = require('axios');
+    const pingInterval = 10 * 60 * 1000; // 10 dakika
+    setInterval(async () => {
+      try {
+        const url = `${keepAliveUrl.replace(/\/$/, '')}/api/health`;
+        await axios.get(url);
+        console.log(`[Keep-Alive] Ping başarılı: ${url} (${new Date().toLocaleTimeString('tr-TR')})`);
+      } catch (e) {
+        console.warn('[Keep-Alive] Ping hatası:', e.message);
+      }
+    }, pingInterval);
+    console.log(`[Keep-Alive] Otomatik uyandırma servisi aktif: ${keepAliveUrl}`);
+  }
 });

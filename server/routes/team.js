@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
@@ -22,9 +22,17 @@ function getRoleColor(role) {
   return PALETTE[Math.abs(hash) % PALETTE.length];
 }
 
+let cachedRoles = null;
+let rolesCacheTime = 0;
+
 // Tüm rolleri listele (Varsayılan + Kayıtlı Özel Roller)
 router.get('/roles', async (req, res) => {
   try {
+    const now = Date.now();
+    if (cachedRoles && (now - rolesCacheTime < 60000)) {
+      return res.json({ data: cachedRoles });
+    }
+
     const defaultRoles = [
       'Soğuk Arama',
       'Saha Satış',
@@ -35,14 +43,17 @@ router.get('/roles', async (req, res) => {
       'admin'
     ];
 
-    const dbRolesRows = await db.all(`
-      SELECT DISTINCT role FROM users WHERE role IS NOT NULL AND TRIM(role) != ''
-      UNION
-      SELECT DISTINCT role FROM team_members WHERE role IS NOT NULL AND TRIM(role) != ''
-    `);
+    const [dbRolesRows, savedCustom] = await Promise.all([
+      db.all(`
+        SELECT DISTINCT role FROM users WHERE role IS NOT NULL AND TRIM(role) != ''
+        UNION
+        SELECT DISTINCT role FROM team_members WHERE role IS NOT NULL AND TRIM(role) != ''
+      `),
+      db.get("SELECT value FROM settings WHERE key = 'custom_roles'")
+    ]);
+
     const dbRoles = dbRolesRows.map(r => r.role);
 
-    const savedCustom = await db.get("SELECT value FROM settings WHERE key = 'custom_roles'");
     let customList = [];
     try {
       if (savedCustom?.value) customList = JSON.parse(savedCustom.value);
@@ -50,6 +61,9 @@ router.get('/roles', async (req, res) => {
 
     const allRoles = Array.from(new Set([...defaultRoles, ...dbRoles, ...customList]))
       .filter(r => r && r !== 'member' && r !== 'Ekip Üyesi');
+
+    cachedRoles = allRoles;
+    rolesCacheTime = now;
 
     res.json({ data: allRoles });
   } catch (err) {
@@ -78,6 +92,7 @@ router.post('/roles', async (req, res) => {
         INSERT INTO settings (key, value) VALUES ('custom_roles', ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
       `, JSON.stringify(customList));
+      cachedRoles = null;
     }
 
     res.json({ success: true, role: cleanRole, message: `"${cleanRole}" rolü başarıyla kaydedildi.` });

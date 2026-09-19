@@ -1,20 +1,33 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const axios = require('axios');
 
+let cachedSettings = null;
+let settingsCacheTime = 0;
+
 // Ayarları getir
 router.get('/', async (req, res) => {
   try {
+    const now = Date.now();
+    if (cachedSettings && (now - settingsCacheTime < 60000)) {
+      return res.json(cachedSettings);
+    }
+
     const rows = await db.all('SELECT key, value FROM settings');
     const settings = {};
     rows.forEach(r => { settings[r.key] = r.value; });
 
-    res.json({
+    const result = {
       google_maps_api_key: settings.google_maps_api_key || '',
       has_api_key: Boolean(settings.google_maps_api_key && settings.google_maps_api_key.trim().length > 10),
       default_city: settings.default_city || 'İstanbul'
-    });
+    };
+
+    cachedSettings = result;
+    settingsCacheTime = now;
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -38,6 +51,7 @@ router.post('/', async (req, res) => {
       await db.run(upsertSql, 'default_city', default_city.trim());
     }
 
+    cachedSettings = null;
     res.json({ success: true, message: 'Ayarlar başarıyla kaydedildi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });

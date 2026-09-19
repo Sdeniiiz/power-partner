@@ -38,8 +38,6 @@ router.get('/events', async (req, res) => {
       jobParams.push(member_id);
     }
 
-    const jobEvents = await db.all(jobsQuery, ...jobParams);
-
     // 2. Randevu / Ziyaret Tarihleri (Leads with visit_date)
     let visitQuery = `
       SELECT
@@ -61,7 +59,11 @@ router.get('/events', async (req, res) => {
       WHERE l.visit_date IS NOT NULL AND l.visit_date != '' AND l.status = 'randevu'
     `;
 
-    const visitEvents = await db.all(visitQuery);
+    // Her iki sorguyu paralel çalıştır
+    const [jobEvents, visitEvents] = await Promise.all([
+      db.all(jobsQuery, ...jobParams),
+      db.all(visitQuery)
+    ]);
 
     // İki kaynağı birleştirip tarihe göre sıralayalım
     const allEvents = [...jobEvents, ...visitEvents].sort((a, b) => {

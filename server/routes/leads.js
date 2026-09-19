@@ -4,6 +4,38 @@ const db = require('../db');
 const GoogleMapsService = require('../services/googleMapsService');
 const { analyzePhoneNumber } = require('../services/phoneAnalyzer');
 
+// Hızlı bellek içi önbellek (Tokyo Turso sorgu gecikmesini sıfırlamak için)
+let cachedStats = null;
+let statsCacheTime = 0;
+let cachedFilterMeta = null;
+let filterMetaCacheTime = 0;
+
+const getCachedStats = async () => {
+  const now = Date.now();
+  if (cachedStats && (now - statsCacheTime < 25000)) {
+    return cachedStats;
+  }
+  const stats = await db.get(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN status = 'arama_listesi' THEN 1 ELSE 0 END) as in_queue,
+      SUM(CASE WHEN status = 'mutlak_olumsuz' THEN 1 ELSE 0 END) as mutlak_olumsuz,
+      SUM(CASE WHEN status = 'randevu' THEN 1 ELSE 0 END) as randevu,
+      SUM(CASE WHEN status = 'satis_havuzu' THEN 1 ELSE 0 END) as satis_havuzu,
+      SUM(CASE WHEN status = 'is_dagitildi' THEN 1 ELSE 0 END) as is_dagitildi,
+      SUM(CASE WHEN status = 'iletisimsiz' THEN 1 ELSE 0 END) as iletisimsiz
+    FROM leads
+  `);
+  cachedStats = stats;
+  statsCacheTime = now;
+  return stats;
+};
+
+const invalidateCache = () => {
+  cachedStats = null;
+  cachedFilterMeta = null;
+};
+
 const getApiKey = async () => {
   const row = await db.get("SELECT value FROM settings WHERE key = 'google_maps_api_key'");
   return row?.value || '';
@@ -103,38 +135,40 @@ router.post('/import', async (req, res) => {
       await db.batch(stmts.slice(i, i + 50), 'write');
     }
 
+    invalidateCache();
     res.json({ success: true, count: stmts.length, message: `${stmts.length} işletme arama listesine kaydedildi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// İlçe ve Sektör/Kategori filtre seçeneklerini getir
+// İlçe ve Sektör/Kategori filtre seçeneklerini getir (Hızlı Paralel & Önbellekli)
 router.get('/meta/filters', async (req, res) => {
   try {
-    const districtRows = await db.all(`
-      SELECT DISTINCT district 
-      FROM leads 
-      WHERE district IS NOT NULL AND TRIM(district) != '' 
-      ORDER BY district ASC
-    `);
-    const districts = districtRows.map(r => r.district);
+    const now = Date.now();
+    if (cachedFilterMeta && (now - filterMetaCacheTime < 60000)) {
+      return res.json(cachedFilterMeta);
+    }
 
-    const categoryRows = await db.all(`
-      SELECT DISTINCT category 
-      FROM leads 
-      WHERE category IS NOT NULL AND TRIM(category) != '' 
-      ORDER BY category ASC
-    `);
-    const categories = categoryRows.map(r => r.category);
+    const [districtRows, categoryRows] = await Promise.all([
+      db.all(`SELECT DISTINCT district FROM leads WHERE district IS NOT NULL AND TRIM(district) != '' ORDER BY district ASC`),
+      db.all(`SELECT DISTINCT category FROM leads WHERE category IS NOT NULL AND TRIM(category) != '' ORDER BY category ASC`)
+    ]);
 
-    res.json({ districts, categories });
+    const result = {
+      districts: districtRows.map(r => r.district),
+      categories: categoryRows.map(r => r.category)
+    };
+
+    cachedFilterMeta = result;
+    filterMetaCacheTime = now;
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// İşletmeleri listele ve filtrele
+// İşletmeleri listele ve filtrele (Paralel Sorgu & Hızlı İstatistik)
 router.get('/', async (req, res) => {
   try {
     const { 
@@ -191,20 +225,11 @@ router.get('/', async (req, res) => {
     query += ' ORDER BY score DESC, id DESC LIMIT ?';
     params.push(Number(limit));
 
-    const rows = await db.all(query, ...params);
-
-    // İstatistikler (Diyagram aşamaları bazında özet)
-    const stats = await db.get(`
-      SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'arama_listesi' THEN 1 ELSE 0 END) as in_queue,
-        SUM(CASE WHEN status = 'mutlak_olumsuz' THEN 1 ELSE 0 END) as mutlak_olumsuz,
-        SUM(CASE WHEN status = 'randevu' THEN 1 ELSE 0 END) as randevu,
-        SUM(CASE WHEN status = 'satis_havuzu' THEN 1 ELSE 0 END) as satis_havuzu,
-        SUM(CASE WHEN status = 'is_dagitildi' THEN 1 ELSE 0 END) as is_dagitildi,
-        SUM(CASE WHEN status = 'iletisimsiz' THEN 1 ELSE 0 END) as iletisimsiz
-      FROM leads
-    `);
+    // Her iki sorguyu eşzamanlı (paralel) çalıştırıp gecikmeyi yarı yarıya düşürüyoruz
+    const [rows, stats] = await Promise.all([
+      db.all(query, ...params),
+      getCachedStats()
+    ]);
 
     res.json({ data: rows, stats });
   } catch (err) {
@@ -212,20 +237,22 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Tek işletme ve arama geçmişi
+// Tek işletme ve arama geçmişi (Paralel sorgular)
 router.get('/:id', async (req, res) => {
   try {
     const lead = await db.get('SELECT * FROM leads WHERE id = ?', req.params.id);
     if (!lead) return res.status(404).json({ error: 'İşletme bulunamadı' });
 
-    const logs = await db.all('SELECT * FROM call_logs WHERE lead_id = ? ORDER BY created_at DESC', lead.id);
-    const jobs = await db.all(`
-      SELECT j.*, c.name as category_name, c.color as category_color, m.name as member_name, m.color as member_color
-      FROM jobs j
-      LEFT JOIN categories c ON j.category_id = c.id
-      LEFT JOIN team_members m ON j.assigned_member_id = m.id
-      WHERE j.lead_id = ?
-    `, lead.id);
+    const [logs, jobs] = await Promise.all([
+      db.all('SELECT * FROM call_logs WHERE lead_id = ? ORDER BY created_at DESC', lead.id),
+      db.all(`
+        SELECT j.*, c.name as category_name, c.color as category_color, m.name as member_name, m.color as member_color
+        FROM jobs j
+        LEFT JOIN categories c ON j.category_id = c.id
+        LEFT JOIN team_members m ON j.assigned_member_id = m.id
+        WHERE j.lead_id = ?
+      `, lead.id)
+    ]);
 
     res.json({ lead, logs, jobs });
   } catch (err) {
@@ -282,6 +309,8 @@ router.post('/:id/call', async (req, res) => {
       leadId
     );
 
+    invalidateCache();
+
     const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
     res.json({ success: true, lead: updatedLead, message: 'Arama kaydı ve durum güncellendi.' });
   } catch (err) {
@@ -317,6 +346,8 @@ router.put('/:id', async (req, res) => {
       city !== undefined ? city : null,
       leadId
     );
+
+    invalidateCache();
 
     const updated = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
     res.json({ success: true, data: updated });
@@ -360,6 +391,7 @@ router.put('/campaigns/rename', async (req, res) => {
       WHERE district = ? AND category = ?
     `, newDistrict.trim(), newCategory.trim(), oldDistrict.trim(), oldCategory.trim());
 
+    invalidateCache();
     res.json({ success: true, count: result.changes, message: `${result.changes} işletme güncellendi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -382,6 +414,7 @@ router.delete('/campaigns/delete', async (req, res) => {
       await db.run(`DELETE FROM call_logs WHERE lead_id IN (${placeholders})`, ...leadIds);
       await db.run(`DELETE FROM jobs WHERE lead_id IN (${placeholders})`, ...leadIds);
       const delResult = await db.run(`DELETE FROM leads WHERE id IN (${placeholders})`, ...leadIds);
+      invalidateCache();
       return res.json({ success: true, count: delResult.changes, message: `${delResult.changes} işletme ve bağlı kayıtlar silindi.` });
     }
 
@@ -406,6 +439,7 @@ router.post('/batch-status', async (req, res) => {
       WHERE id IN (${placeholders})
     `, targetStatus, ...leadIds);
 
+    invalidateCache();
     res.json({
       success: true,
       count: result.changes,
@@ -425,6 +459,7 @@ router.post('/requeue-unreachable', async (req, res) => {
       WHERE status = 'iletisimsiz'
     `);
 
+    invalidateCache();
     res.json({
       success: true,
       count: result.changes,
@@ -445,6 +480,7 @@ router.post('/admin/clear-queue', async (req, res) => {
       await db.run(`DELETE FROM call_logs WHERE lead_id IN (${placeholders})`, ...queueLeads);
       await db.run(`DELETE FROM jobs WHERE lead_id IN (${placeholders})`, ...queueLeads);
       const delResult = await db.run(`DELETE FROM leads WHERE id IN (${placeholders})`, ...queueLeads);
+      invalidateCache();
       return res.json({ success: true, count: delResult.changes, message: `${delResult.changes} bekleyen işletme arama listesinden temizlendi.` });
     }
     res.json({ success: true, count: 0, message: 'Arama listesinde temizlenecek işletme yok.' });
@@ -459,6 +495,7 @@ router.post('/admin/clear-all', async (req, res) => {
     await db.run('DELETE FROM call_logs');
     await db.run('DELETE FROM jobs');
     const result = await db.run('DELETE FROM leads');
+    invalidateCache();
     res.json({ success: true, count: result.changes, message: `Tüm sistem sıfırlandı: ${result.changes} işletme silindi.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -471,6 +508,7 @@ router.delete('/:id', async (req, res) => {
     await db.run('DELETE FROM call_logs WHERE lead_id = ?', req.params.id);
     await db.run('DELETE FROM jobs WHERE lead_id = ?', req.params.id);
     await db.run('DELETE FROM leads WHERE id = ?', req.params.id);
+    invalidateCache();
     res.json({ success: true, message: 'İşletme silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });

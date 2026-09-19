@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const { createClient } = require('@libsql/client');
 
 const url = process.env.TURSO_DATABASE_URL;
@@ -161,8 +161,7 @@ async function initDb() {
       );
     `);
 
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS users (
+    await client.execute(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
@@ -173,7 +172,18 @@ async function initDb() {
       );
     `);
 
-    console.log('✅ Turso veritabanı tabloları hazır ve doğrulandı.');
+    // Hızlı sorgular için performans indeksleri
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_district ON leads(district);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_category ON leads(category);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(score DESC);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_is_mobile ON leads(is_mobile);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_assigned ON jobs(assigned_member_id);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_lead ON jobs(lead_id);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_due_date ON jobs(due_date);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_call_logs_lead ON call_logs(lead_id);');
+
+    console.log('✅ Turso veritabanı tabloları ve indeksleri hazır.');
   } catch (err) {
     console.error('❌ Turso veritabanı başlatma hatası:', err.message);
   }
