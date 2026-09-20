@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const GoogleMapsService = require('../services/googleMapsService');
@@ -38,7 +38,13 @@ const invalidateCache = () => {
 
 const getApiKey = async () => {
   const row = await db.get("SELECT value FROM settings WHERE key = 'google_maps_api_key'");
-  return row?.value || '';
+  if (row?.value && row.value.trim().length > 10) {
+    return row.value.trim();
+  }
+  if (process.env.GOOGLE_MAPS_API_KEY && process.env.GOOGLE_MAPS_API_KEY.trim().length > 10) {
+    return process.env.GOOGLE_MAPS_API_KEY.trim();
+  }
+  return '';
 };
 
 const mapsService = new GoogleMapsService(getApiKey);

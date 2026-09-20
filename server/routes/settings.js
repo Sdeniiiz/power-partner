@@ -18,9 +18,11 @@ router.get('/', async (req, res) => {
     const settings = {};
     rows.forEach(r => { settings[r.key] = r.value; });
 
+    const apiKey = settings.google_maps_api_key || process.env.GOOGLE_MAPS_API_KEY || '';
+
     const result = {
-      google_maps_api_key: settings.google_maps_api_key || '',
-      has_api_key: Boolean(settings.google_maps_api_key && settings.google_maps_api_key.trim().length > 10),
+      google_maps_api_key: apiKey,
+      has_api_key: Boolean(apiKey && apiKey.trim().length > 10),
       default_city: settings.default_city || 'İstanbul'
     };
 
