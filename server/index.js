@@ -19,12 +19,14 @@ const leadsRoutes = require('./routes/leads');
 const jobsRoutes = require('./routes/jobs');
 const teamRoutes = require('./routes/team');
 const calendarRoutes = require('./routes/calendar');
+const ownerRoutes = require('./routes/owner');
 
 app.use('/api/settings', settingsRoutes);
 app.use('/api/leads', leadsRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/calendar', calendarRoutes);
+app.use('/api/owner', ownerRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -71,3 +73,4 @@ app.listen(PORT, () => {
     console.log(`[Keep-Alive] Otomatik uyandırma servisi aktif: ${keepAliveUrl}`);
   }
 });
+
