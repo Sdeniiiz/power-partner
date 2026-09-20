@@ -21,6 +21,9 @@ class GoogleMapsService {
 
     // API Anahtarı girilmişse gerçek Google Places API'yi çağır
     if (apiKey && apiKey.length > 10) {
+      let v1Error = null;
+      let legacyError = null;
+
       // 1. Modern Places API (New) v1 üzerinden çoklu sayfalama ve varyasyon taraması
       try {
         const v1Results = await this.searchPlacesV1Deep(baseQuery, district, category, city, apiKey, deepSearch);
@@ -33,7 +36,8 @@ class GoogleMapsService {
           };
         }
       } catch (errV1) {
-        console.warn('Places API (New) sorgusu başarısız, Legacy deneniyor:', errV1.message);
+        v1Error = errV1.response?.data?.error?.message || errV1.message;
+        console.warn('Places API (New) sorgusu başarısız, Legacy deneniyor:', v1Error);
       }
 
       // 2. Olmazsa Klasik Places API (Legacy) üzerinden çoklu sayfalama
@@ -48,14 +52,29 @@ class GoogleMapsService {
           };
         }
       } catch (errLegacy) {
-        console.error('Google Places API (Legacy) Hatası:', errLegacy.message);
-        return {
-          error: `Google API Hatası: ${errLegacy.message}`,
-          isDemo: true,
-          totalFound: 40,
-          data: this.generateRealisticMockPlaces(district, category, city, 45)
-        };
+        legacyError = errLegacy.message;
+        console.error('Google Places API (Legacy) Hatası:', legacyError);
       }
+
+      // Her iki API de hata verdiyse kullanıcı için net ve yol gösterici teşhis
+      let friendlyReason = '';
+      const combined = `${v1Error || ''} ${legacyError || ''}`;
+      if (combined.includes('PERMISSION_DENIED') || combined.includes('permission') || combined.includes('LegacyApiNotActivated')) {
+        friendlyReason = "Google Cloud Console projenizde 'Places API (New)' servisi henüz etkinleştirilmemiş (Enable) veya API anahtarınızda bu servis kısıtlanmış. console.cloud.google.com adresinden 'Places API (New)' servisini etkinleştirmeniz gerekmektedir.";
+      } else if (combined.includes('Billing') || combined.includes('billing') || combined.includes('BILLING')) {
+        friendlyReason = "Google Cloud projenizde Faturalandırma Hesabı (Billing Account) aktif değil. Google Harita aramaları için faturalandırma bağlanmalıdır (Google aylık 200$ ücretsiz kullanım hakkı sunar).";
+      } else if (combined.includes('API_KEY_INVALID') || combined.includes('Invalid API key')) {
+        friendlyReason = "Google Maps API anahtarı geçersiz. Lütfen Ayarlar bölümünden anahtarınızı kontrol ediniz.";
+      } else {
+        friendlyReason = v1Error || legacyError || 'Google Maps API bağlantısı sağlanamadı.';
+      }
+
+      return {
+        error: friendlyReason,
+        isDemo: true,
+        totalFound: 40,
+        data: this.generateRealisticMockPlaces(district, category, city, 45)
+      };
     }
 
     // API anahtarı yoksa gerçekçi simülasyon işletmeleri üret
@@ -216,7 +235,11 @@ class GoogleMapsService {
 
         if (!pageToken || pageCount >= maxPages) break;
       } catch (err) {
-        console.warn(`v1 sayfalama hatası (${textQuery}, sayfa ${pageCount}):`, err.message);
+        const errMsg = err.response?.data?.error?.message || err.message;
+        console.warn(`v1 sayfalama hatası (${textQuery}, sayfa ${pageCount}):`, errMsg);
+        if (pageCount === 0) {
+          throw err;
+        }
         break;
       }
     } while (pageToken && pageCount < maxPages);

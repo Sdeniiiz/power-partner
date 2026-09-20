@@ -61,6 +61,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [isDemoData, setIsDemoData] = useState(false);
+  const [searchError, setSearchError] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState(null);
@@ -78,6 +79,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
     if (e) e.preventDefault();
     setLoading(true);
     setImportStatus(null);
+    setSearchError(null);
     setSelectedIds(new Set());
 
     try {
@@ -92,9 +94,11 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
       const list = res.data || [];
       setResults(list);
       setIsDemoData(res.isDemo || false);
+      setSearchError(res.error || null);
       setSelectedIds(new Set(list.map(item => item.place_id)));
     } catch (err) {
-      alert(`Arama sırasında hata: ${err.response?.data?.error || err.message}`);
+      const msg = err.response?.data?.error || err.message;
+      setSearchError(`Arama isteği başarısız oldu: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -652,6 +656,45 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
               {fileHint}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Google API Hata / Yetki Bildirim Kartı */}
+      {searchError && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 rounded-2xl p-4 sm:p-5 shadow-xs flex items-start gap-3.5">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0 mt-0.5">
+            <AlertCircle className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-extrabold text-amber-950 text-sm">
+                Google Haritalar API Bildirimi
+              </h3>
+              <span className="bg-amber-200/80 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                Simülasyon Moduna Geçildi
+              </span>
+            </div>
+            <p className="text-xs text-amber-900/90 mt-1 leading-relaxed">
+              {searchError}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="text-xs font-bold bg-white text-slate-800 border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-all cursor-pointer shadow-2xs"
+              >
+                API Anahtarı Ayarlarını Aç
+              </button>
+              <a
+                href="https://console.cloud.google.com/apis/library/places.googleapis.com"
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-all inline-flex items-center gap-1 shadow-2xs"
+              >
+                Google Cloud'da Places API (New)'i Etkinleştir ↗
+              </a>
+            </div>
+          </div>
         </div>
       )}
 
