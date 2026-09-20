@@ -21,7 +21,8 @@ import {
   UserPlus,
   Shield,
   RefreshCw,
-  Lock
+  Lock,
+  LogOut
 } from 'lucide-react';
 import { 
   getSettings, 
@@ -45,7 +46,7 @@ import {
   addCustomRole
 } from '../api';
 
-export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, teamMembers, categories, authUser }) {
+export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, teamMembers, categories, authUser, onLogout }) {
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [defaultCity, setDefaultCity] = useState('İstanbul');
@@ -523,12 +524,29 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-2">
+            {onLogout && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onLogout();
+                }}
+                className="flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs active:scale-95"
+                title="Hesaptan Çıkış Yap"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-600" />
+                <span>Çıkış Yap</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer rounded-lg hover:bg-slate-100 transition-colors"
+              title="Kapat"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {saveMessage && (

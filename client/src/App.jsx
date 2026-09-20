@@ -166,6 +166,7 @@ export default function App() {
         teamMembers={teamMembers}
         categories={categories}
         authUser={authUser}
+        onLogout={handleLogout}
       />
 
       {/* Alt Bilgi */}
