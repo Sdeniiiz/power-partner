@@ -172,6 +172,19 @@ async function initDb() {
       );
     `);
 
+    // Yalnızca işletme sahibi asistanına ait kalıcı konuşma ve karar hafızası.
+    // Personel CRM ekranlarında kullanılmaz veya gösterilmez.
+    await client.execute(`CREATE TABLE IF NOT EXISTS owner_assistant_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      subject TEXT,
+      content TEXT NOT NULL,
+      source_lead_id INTEGER,
+      metadata TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(source_lead_id) REFERENCES leads(id)
+    );`);
+
     // Hızlı sorgular için performans indeksleri
     await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_district ON leads(district);');
@@ -182,6 +195,8 @@ async function initDb() {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_lead ON jobs(lead_id);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_due_date ON jobs(due_date);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_call_logs_lead ON call_logs(lead_id);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_created ON owner_assistant_memory(created_at DESC);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_lead ON owner_assistant_memory(source_lead_id, created_at DESC);');
 
     console.log('✅ Turso veritabanı tabloları ve indeksleri hazır.');
   } catch (err) {
@@ -192,3 +207,4 @@ async function initDb() {
 initDb().catch(console.error);
 
 module.exports = db;
+
