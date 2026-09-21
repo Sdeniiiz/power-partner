@@ -95,23 +95,41 @@ class GoogleMapsService {
       { query: baseQuery, maxPages: deepSearch ? 2 : 1 }
     ];
 
-    // Derin tarama açıksa en alakalı 1 varyasyon sorgusunu ekle (aşırı API ve sayfalama gecikmesini önler)
+    // Derin tarama açıksa kategori varyasyonlarını paralel ekle (tüm işletmeleri eksiksiz bulmak için)
     if (deepSearch) {
       const lowerCat = (category || '').toLowerCase();
-      let synonym = null;
+      const synonyms = [];
       if (lowerCat.includes('kafe') || lowerCat.includes('cafe')) {
-        synonym = `${district} ${city} kahve`;
+        synonyms.push(`${district} ${city} cafe`);
+        synonyms.push(`${district} ${city} kahve`);
+        synonyms.push(`${district} ${city} coffee`);
+        synonyms.push(`${district} ${city} pastane`);
       } else if (lowerCat.includes('restoran') || lowerCat.includes('restaurant')) {
-        synonym = `${district} ${city} lokanta`;
+        synonyms.push(`${district} ${city} restaurant`);
+        synonyms.push(`${district} ${city} lokanta`);
+        synonyms.push(`${district} ${city} kebap`);
+        synonyms.push(`${district} ${city} yemek`);
       } else if (lowerCat.includes('giyim')) {
-        synonym = `${district} ${city} butik`;
+        synonyms.push(`${district} ${city} butik`);
+        synonyms.push(`${district} ${city} giyim`);
+        synonyms.push(`${district} ${city} moda`);
+        synonyms.push(`${district} ${city} mağaza`);
       } else if (lowerCat.includes('kuafor') || lowerCat.includes('kuaför')) {
-        synonym = `${district} ${city} güzellik salonu`;
+        synonyms.push(`${district} ${city} kuaför`);
+        synonyms.push(`${district} ${city} güzellik salonu`);
+        synonyms.push(`${district} ${city} berber`);
       } else if (lowerCat.includes('otel')) {
-        synonym = `${district} ${city} butik otel`;
+        synonyms.push(`${district} ${city} butik otel`);
+        synonyms.push(`${district} ${city} pansiyon`);
+        synonyms.push(`${district} ${city} otel`);
+      } else {
+        synonyms.push(`${district} ${city} ${category}`);
       }
-      if (synonym && synonym.toLowerCase() !== baseQuery.toLowerCase()) {
-        queryConfigs.push({ query: synonym, maxPages: 1 });
+
+      for (const syn of synonyms) {
+        if (syn.toLowerCase() !== baseQuery.toLowerCase() && !queryConfigs.some(c => c.query.toLowerCase() === syn.toLowerCase())) {
+          queryConfigs.push({ query: syn, maxPages: 2 });
+        }
       }
     }
 

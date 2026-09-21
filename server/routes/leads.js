@@ -202,20 +202,10 @@ router.post('/import', async (req, res) => {
   }
 });
 
-// Adayları seçilen personellere eşit (round-robin) veya tekil olarak paylaştır
+// Adayları seçilen personellere eşit (round-robin) veya Ortak Havuz'a (atanmamış) paylaştır
 router.post('/distribute', async (req, res) => {
   try {
-    const { lead_ids, caller_ids, district } = req.body;
-
-    if (!Array.isArray(caller_ids) || caller_ids.length === 0) {
-      return res.status(400).json({ error: 'Lütfen paylaştırılacak en az bir personel seçiniz.' });
-    }
-
-    const cleanCallerIds = caller_ids.map(Number).filter(Boolean);
-    const placeholders = cleanCallerIds.map(() => '?').join(',');
-    const members = await db.all(`SELECT id, name FROM team_members WHERE id IN (${placeholders})`, ...cleanCallerIds);
-    const memberMap = new Map();
-    members.forEach(m => memberMap.set(m.id, m.name));
+    const { lead_ids, caller_ids, district, unassign, to_pool } = req.body;
 
     let targetLeadIds = [];
     if (Array.isArray(lead_ids) && lead_ids.length > 0) {
@@ -228,6 +218,48 @@ router.post('/distribute', async (req, res) => {
     if (targetLeadIds.length === 0) {
       return res.status(400).json({ error: 'Paylaştırılacak işletme bulunamadı.' });
     }
+
+    // 1. Ortak Havuz'a geri alma durumu (Atamayı kaldır)
+    const isUnassignRequest = Boolean(
+      unassign ||
+      to_pool ||
+      (Array.isArray(caller_ids) && (caller_ids.includes('unassigned') || caller_ids.includes(0) || caller_ids.includes('0')))
+    );
+
+    if (isUnassignRequest) {
+      const stmts = targetLeadIds.map(leadId => ({
+        sql: 'UPDATE leads SET assigned_caller_id = NULL, assigned_caller_name = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        args: [leadId]
+      }));
+
+      for (let i = 0; i < stmts.length; i += 50) {
+        await db.batch(stmts.slice(i, i + 50), 'write');
+      }
+
+      invalidateCache();
+
+      return res.json({
+        success: true,
+        count: targetLeadIds.length,
+        unassigned: true,
+        message: `${targetLeadIds.length} işletme ortak havuza (atanmamış) başarıyla geri alındı.`
+      });
+    }
+
+    // 2. Personellere paylaştırma durumu
+    if (!Array.isArray(caller_ids) || caller_ids.length === 0) {
+      return res.status(400).json({ error: 'Lütfen paylaştırılacak en az bir personel veya Ortak Havuz seçiniz.' });
+    }
+
+    const cleanCallerIds = caller_ids.map(Number).filter(Boolean);
+    if (cleanCallerIds.length === 0) {
+      return res.status(400).json({ error: 'Geçerli bir personel seçilmedi.' });
+    }
+
+    const placeholders = cleanCallerIds.map(() => '?').join(',');
+    const members = await db.all(`SELECT id, name FROM team_members WHERE id IN (${placeholders})`, ...cleanCallerIds);
+    const memberMap = new Map();
+    members.forEach(m => memberMap.set(m.id, m.name));
 
     const stmts = [];
     targetLeadIds.forEach((leadId, idx) => {

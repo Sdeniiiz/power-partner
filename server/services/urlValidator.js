@@ -161,22 +161,24 @@ async function verifyWebsitesInBatch(places, maxGlobalTimeoutMs = 1800) {
   await Promise.race([checkPromise, timeoutPromise]);
 
   // Sonuçları işletme objelerine eşleştir
+  // Google Haritalarda web sitesi kayıtlı olan işletmeler kesinlikle has_website: true olarak korunur.
+  // Otomatik bot kontrolünün yavaş kalması işletmenin sitesi olmadığı anlamına gelmez.
   results.forEach(item => {
     if (item.website) {
+      item.has_website = true;
       const check = urlStatusMap.get(item.website);
       if (check) {
         item.website_status = check.status;
         if (!check.isAlive) {
-          item.has_website = false;
-          item.website_broken_note = 'Web sitesi açılmıyor / arızalı';
-        } else {
-          item.has_website = true;
+          item.website_broken_note = 'Web sitesi yavaş veya yanıt vermiyor olabilir';
         }
       } else {
         // Süre sınırı içinde yanıt vermeyen siteler "unknown" olarak kalır
         item.website_status = 'unknown';
-        item.has_website = true;
       }
+    } else {
+      item.has_website = false;
+      item.website_status = 'none';
     }
   });
 

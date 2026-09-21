@@ -75,6 +75,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
   const [teamMembers, setTeamMembers] = useState([]);
   const [showDistributeModal, setShowDistributeModal] = useState(false);
   const [selectedCallerIds, setSelectedCallerIds] = useState(new Set());
+  const [distributeToPool, setDistributeToPool] = useState(false);
 
   React.useEffect(() => {
     getTeamMembers().then(res => {
@@ -1203,73 +1204,136 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
             </div>
 
             <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Paylaştırılacak Personelleri Seçin:
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCallerIds(new Set(teamMembers.map(m => m.id)))}
-                    className="text-[11px] text-blue-600 font-bold hover:underline cursor-pointer"
-                  >
-                    Tümünü Seç
-                  </button>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCallerIds(new Set())}
-                    className="text-[11px] text-slate-500 font-bold hover:underline cursor-pointer"
-                  >
-                    Temizle
-                  </button>
+              {/* 1. SEÇENEK: ORTAK HAVUZ (ATANMAMIŞ) */}
+              <div
+                onClick={() => {
+                  setDistributeToPool(true);
+                  setSelectedCallerIds(new Set());
+                }}
+                className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                  distributeToPool 
+                    ? 'bg-amber-50/90 border-amber-400 ring-2 ring-amber-400/20 shadow-xs' 
+                    : 'bg-slate-50/60 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-2xs shrink-0">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <span>🌐 Ortak Havuz (Atanmamış)</span>
+                      {distributeToPool && (
+                        <span className="text-[10px] bg-amber-200 text-amber-900 font-extrabold px-1.5 py-0.2 rounded">
+                          Seçili
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Herhangi bir personele atama yapmadan adayları genel arama havuzuna aktarır.
+                    </div>
+                  </div>
+                </div>
+
+                <input
+                  type="radio"
+                  name="leadfinder_distribute_target"
+                  checked={distributeToPool}
+                  onChange={() => {
+                    setDistributeToPool(true);
+                    setSelectedCallerIds(new Set());
+                  }}
+                  className="w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
+              </div>
+
+              {/* 2. SEÇENEK: PERSONELLERE PAYLAŞTIRMA */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-indigo-600" />
+                    Veya Personellere Paylaştır:
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDistributeToPool(false);
+                        setSelectedCallerIds(new Set(teamMembers.map(m => m.id)));
+                      }}
+                      className="text-[11px] text-blue-600 font-bold hover:underline cursor-pointer"
+                    >
+                      Tümünü Seç
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCallerIds(new Set())}
+                      className="text-[11px] text-slate-500 font-bold hover:underline cursor-pointer"
+                    >
+                      Temizle
+                    </button>
+                  </div>
+                </div>
+
+                {/* Personel Listesi */}
+                <div className="space-y-2 max-h-52 overflow-y-auto p-1">
+                  {teamMembers.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-4">Ekip üyesi bulunamadı.</p>
+                  ) : (
+                    teamMembers.map(member => {
+                      const isChecked = !distributeToPool && selectedCallerIds.has(member.id);
+                      return (
+                        <div
+                          key={member.id}
+                          onClick={() => {
+                            setDistributeToPool(false);
+                            toggleCallerSelect(member.id);
+                          }}
+                          className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all cursor-pointer ${
+                            isChecked 
+                              ? 'bg-indigo-50/70 border-indigo-300 shadow-2xs' 
+                              : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div 
+                              className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-2xs"
+                              style={{ backgroundColor: member.color || '#4f46e5' }}
+                            >
+                              {member.name.slice(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-slate-800">{member.name}</div>
+                              <div className="text-[11px] text-slate-500">{member.role || 'Ekip Üyesi'}</div>
+                            </div>
+                          </div>
+
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}} // onClick parent handle ediyor
+                            className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                          />
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
-              {/* Personel Listesi */}
-              <div className="space-y-2 max-h-60 overflow-y-auto p-1">
-                {teamMembers.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-4">Ekip üyesi bulunamadı.</p>
-                ) : (
-                  teamMembers.map(member => {
-                    const isChecked = selectedCallerIds.has(member.id);
-                    return (
-                      <div
-                        key={member.id}
-                        onClick={() => toggleCallerSelect(member.id)}
-                        className={`flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer ${
-                          isChecked 
-                            ? 'bg-indigo-50/70 border-indigo-300 shadow-2xs' 
-                            : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div 
-                            className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-2xs"
-                            style={{ backgroundColor: member.color || '#4f46e5' }}
-                          >
-                            {member.name.slice(0, 2).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-slate-800">{member.name}</div>
-                            <div className="text-[11px] text-slate-500">{member.role || 'Ekip Üyesi'}</div>
-                          </div>
-                        </div>
-
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {}} // onClick parent handle ediyor
-                          className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                        />
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
               {/* Dağıtım Önizleme Kutusu */}
-              {selectedCallerIds.size > 0 && selectedIds.size > 0 && (
+              {distributeToPool ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-950 font-medium">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-900 mb-1">
+                    <Building2 className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Ortak Havuz Kaydı:</span>
+                  </div>
+                  <span>
+                    Seçili <strong>{selectedIds.size}</strong> işletme herhangi bir personele atanmadan genel <strong>Ortak Havuz</strong>a aktarılacaktır.
+                  </span>
+                </div>
+              ) : selectedCallerIds.size > 0 && selectedIds.size > 0 && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3.5 text-xs text-indigo-950 font-medium">
                   <div className="flex items-center gap-1.5 font-bold text-indigo-900 mb-1">
                     <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
@@ -1297,19 +1361,35 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
               >
                 Vazgeç
               </button>
-              <button
-                type="button"
-                disabled={importing || selectedCallerIds.size === 0 || selectedIds.size === 0}
-                onClick={() => handleImport(Array.from(selectedCallerIds))}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
-              >
-                {importing ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Users className="w-4 h-4" />
-                )}
-                <span>Paylaştır ve İçe Aktar ({selectedIds.size})</span>
-              </button>
+              {distributeToPool ? (
+                <button
+                  type="button"
+                  disabled={importing || selectedIds.size === 0}
+                  onClick={() => handleImport(null)}
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {importing ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Building2 className="w-4 h-4" />
+                  )}
+                  <span>Ortak Havuza Aktar ({selectedIds.size})</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={importing || selectedCallerIds.size === 0 || selectedIds.size === 0}
+                  onClick={() => handleImport(Array.from(selectedCallerIds))}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {importing ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Users className="w-4 h-4" />
+                  )}
+                  <span>Paylaştır ve İçe Aktar ({selectedIds.size})</span>
+                </button>
+              )}
             </div>
 
           </div>

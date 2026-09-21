@@ -28,7 +28,8 @@ import {
   X,
   Users,
   UserCheck,
-  Bell
+  Bell,
+  Building2
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
 import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers } from '../api';
@@ -62,6 +63,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const [assignedCallerFilter, setAssignedCallerFilter] = useState('');
   const [showBatchDistributeModal, setShowBatchDistributeModal] = useState(false);
   const [selectedBatchCallerIds, setSelectedBatchCallerIds] = useState(new Set());
+  const [distributeToPool, setDistributeToPool] = useState(false);
 
   const loadFilterMeta = async () => {
     try {
@@ -204,21 +206,30 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   };
 
   const handleBatchDistribute = async () => {
-    if (selectedLeadIds.length === 0 || selectedBatchCallerIds.size === 0) return;
+    if (selectedLeadIds.length === 0) return;
+    if (!distributeToPool && selectedBatchCallerIds.size === 0) {
+      alert('Lütfen en az bir personel seçiniz veya Ortak Havuz seçeneğini işaretleyiniz.');
+      return;
+    }
     setBatchActionLoading(true);
     try {
-      const res = await distributeLeads({
-        lead_ids: selectedLeadIds,
-        caller_ids: Array.from(selectedBatchCallerIds)
-      });
-      setActionSuccessMsg(res.message || `${selectedLeadIds.length} işletme seçilen personellere başarıyla paylaştırıldı.`);
+      const payload = {
+        lead_ids: selectedLeadIds
+      };
+      if (distributeToPool) {
+        payload.unassign = true;
+      } else {
+        payload.caller_ids = Array.from(selectedBatchCallerIds);
+      }
+      const res = await distributeLeads(payload);
+      setActionSuccessMsg(res.message || `${selectedLeadIds.length} işletme güncellendi.`);
       setSelectedLeadIds([]);
       setShowBatchDistributeModal(false);
       loadLeads();
       if (onLeadUpdated) onLeadUpdated();
       setTimeout(() => setActionSuccessMsg(''), 4000);
     } catch (err) {
-      alert(`Paylaştırma hatası: ${err.message}`);
+      alert(`İşlem hatası: ${err.message}`);
     } finally {
       setBatchActionLoading(false);
     }
@@ -587,6 +598,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
               type="button"
               disabled={selectedLeadIds.length === 0 || batchActionLoading}
               onClick={() => {
+                setDistributeToPool(false);
                 setSelectedBatchCallerIds(new Set(teamMembers.map(m => m.id)));
                 setShowBatchDistributeModal(true);
               }}
@@ -1205,74 +1217,135 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
             </div>
 
             <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Paylaştırılacak Personeller:
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedBatchCallerIds(new Set(teamMembers.map(m => m.id)))}
-                    className="text-[11px] text-blue-600 font-bold hover:underline cursor-pointer"
-                  >
-                    Tümünü Seç
-                  </button>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedBatchCallerIds(new Set())}
-                    className="text-[11px] text-slate-500 font-bold hover:underline cursor-pointer"
-                  >
-                    Temizle
-                  </button>
+              {/* 1. SEÇENEK: ORTAK HAVUZ (ATANMAMIŞ) */}
+              <div
+                onClick={() => {
+                  setDistributeToPool(true);
+                  setSelectedBatchCallerIds(new Set());
+                }}
+                className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                  distributeToPool 
+                    ? 'bg-amber-50/90 border-amber-400 ring-2 ring-amber-400/20 shadow-xs' 
+                    : 'bg-slate-50/60 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-2xs shrink-0">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <span>🌐 Ortak Havuz (Atanmamış)</span>
+                      {distributeToPool && (
+                        <span className="text-[10px] bg-amber-200 text-amber-900 font-extrabold px-1.5 py-0.2 rounded">
+                          Seçili
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Personel atamasını kaldırır ve işletmeleri tekrar genel arama havuzuna geri alır.
+                    </div>
+                  </div>
+                </div>
+
+                <input
+                  type="radio"
+                  name="distribute_target"
+                  checked={distributeToPool}
+                  onChange={() => {
+                    setDistributeToPool(true);
+                    setSelectedBatchCallerIds(new Set());
+                  }}
+                  className="w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
+              </div>
+
+              {/* 2. SEÇENEK: PERSONELLERE PAYLAŞTIRMA */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-indigo-600" />
+                    Veya Personellere Paylaştır:
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDistributeToPool(false);
+                        setSelectedBatchCallerIds(new Set(teamMembers.map(m => m.id)));
+                      }}
+                      className="text-[11px] text-blue-600 font-bold hover:underline cursor-pointer"
+                    >
+                      Tümünü Seç
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBatchCallerIds(new Set())}
+                      className="text-[11px] text-slate-500 font-bold hover:underline cursor-pointer"
+                    >
+                      Temizle
+                    </button>
+                  </div>
+                </div>
+
+                {/* Personel Checkboxları */}
+                <div className="space-y-2 max-h-52 overflow-y-auto p-1">
+                  {teamMembers.map(member => {
+                    const isChecked = !distributeToPool && selectedBatchCallerIds.has(member.id);
+                    return (
+                      <div
+                        key={member.id}
+                        onClick={() => {
+                          setDistributeToPool(false);
+                          const next = new Set(selectedBatchCallerIds);
+                          if (next.has(member.id)) next.delete(member.id);
+                          else next.add(member.id);
+                          setSelectedBatchCallerIds(next);
+                        }}
+                        className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all cursor-pointer ${
+                          isChecked 
+                            ? 'bg-indigo-50/70 border-indigo-300 shadow-2xs' 
+                            : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div 
+                            className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-2xs"
+                            style={{ backgroundColor: member.color || '#4f46e5' }}
+                          >
+                            {member.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-slate-800">{member.name}</div>
+                            <div className="text-[11px] text-slate-500">{member.role || 'Ekip Üyesi'}</div>
+                          </div>
+                        </div>
+
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Personel Checkboxları */}
-              <div className="space-y-2 max-h-60 overflow-y-auto p-1">
-                {teamMembers.map(member => {
-                  const isChecked = selectedBatchCallerIds.has(member.id);
-                  return (
-                    <div
-                      key={member.id}
-                      onClick={() => {
-                        const next = new Set(selectedBatchCallerIds);
-                        if (next.has(member.id)) next.delete(member.id);
-                        else next.add(member.id);
-                        setSelectedBatchCallerIds(next);
-                      }}
-                      className={`flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer ${
-                        isChecked 
-                          ? 'bg-indigo-50/70 border-indigo-300 shadow-2xs' 
-                          : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div 
-                          className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-2xs"
-                          style={{ backgroundColor: member.color || '#4f46e5' }}
-                        >
-                          {member.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-slate-800">{member.name}</div>
-                          <div className="text-[11px] text-slate-500">{member.role || 'Ekip Üyesi'}</div>
-                        </div>
-                      </div>
-
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => {}}
-                        className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
               {/* Plan Özeti */}
-              {selectedBatchCallerIds.size > 0 && selectedLeadIds.length > 0 && (
+              {distributeToPool ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-950 font-medium">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-900 mb-1">
+                    <RotateCcw className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Ortak Havuz İadesi:</span>
+                  </div>
+                  <span>
+                    Seçili <strong>{selectedLeadIds.length}</strong> işletmenin tüm personel atamaları silinecek ve genel <strong>Ortak Havuz (Atanmamış)</strong> durumuna geri alınacaktır.
+                  </span>
+                </div>
+              ) : selectedBatchCallerIds.size > 0 && selectedLeadIds.length > 0 && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3.5 text-xs text-indigo-950 font-medium">
                   <div className="flex items-center gap-1.5 font-bold text-indigo-900 mb-1">
                     <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
@@ -1299,19 +1372,35 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
               >
                 Vazgeç
               </button>
-              <button
-                type="button"
-                disabled={batchActionLoading || selectedBatchCallerIds.size === 0 || selectedLeadIds.length === 0}
-                onClick={handleBatchDistribute}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
-              >
-                {batchActionLoading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Users className="w-4 h-4" />
-                )}
-                <span>Paylaştır ve Ata ({selectedLeadIds.length})</span>
-              </button>
+              {distributeToPool ? (
+                <button
+                  type="button"
+                  disabled={batchActionLoading || selectedLeadIds.length === 0}
+                  onClick={handleBatchDistribute}
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {batchActionLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-4 h-4" />
+                  )}
+                  <span>Ortak Havuza Geri Al ({selectedLeadIds.length})</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={batchActionLoading || selectedBatchCallerIds.size === 0 || selectedLeadIds.length === 0}
+                  onClick={handleBatchDistribute}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {batchActionLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Users className="w-4 h-4" />
+                  )}
+                  <span>Paylaştır ve Ata ({selectedLeadIds.length})</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
