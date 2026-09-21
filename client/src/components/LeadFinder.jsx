@@ -24,10 +24,13 @@ import {
   Eye,
   FileSpreadsheet,
   ClipboardList,
-  Upload
+  Upload,
+  Users,
+  Check,
+  UserCheck
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { searchPlaces, importLeads } from '../api';
+import { searchPlaces, importLeads, getTeamMembers } from '../api';
 
 const POPULAR_LOCATIONS = [
   { district: 'Atakum', city: 'Samsun', label: 'Samsun Atakum' },
@@ -67,6 +70,25 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
   const [importStatus, setImportStatus] = useState(null);
   const [filterNoWebsite, setFilterNoWebsite] = useState(false);
   const [filterMobileOnly, setFilterMobileOnly] = useState(false);
+
+  // Personel Paylaştırma State
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [showDistributeModal, setShowDistributeModal] = useState(false);
+  const [selectedCallerIds, setSelectedCallerIds] = useState(new Set());
+
+  React.useEffect(() => {
+    getTeamMembers().then(res => {
+      const list = res.data || [];
+      setTeamMembers(list);
+      // Varsayılan olarak soğuk arama veya satış personellerini seç
+      const callers = list.filter(m => /arama|satış|satis|çağrı|cagri/i.test(m.role || ''));
+      if (callers.length > 0) {
+        setSelectedCallerIds(new Set(callers.map(c => c.id)));
+      } else if (list.length > 0) {
+        setSelectedCallerIds(new Set(list.map(c => c.id)));
+      }
+    }).catch(err => console.error('Takım üyeleri alınamadı:', err));
+  }, []);
 
   // Manuel Yapıştır & Excel State
   const [pasteText, setPasteText] = useState('');
@@ -248,7 +270,14 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
     }
   };
 
-  const handleImport = async () => {
+  const toggleCallerSelect = (id) => {
+    const next = new Set(selectedCallerIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedCallerIds(next);
+  };
+
+  const handleImport = async (callerIds = null) => {
     const toImport = results.filter(r => selectedIds.has(r.place_id));
     if (toImport.length === 0) {
       alert('Lütfen eklenecek en az bir işletme seçiniz.');
@@ -257,11 +286,16 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
 
     setImporting(true);
     try {
-      const res = await importLeads(toImport);
+      const payload = { places: toImport };
+      if (Array.isArray(callerIds) && callerIds.length > 0) {
+        payload.assigned_caller_ids = callerIds;
+      }
+      const res = await importLeads(payload);
       setImportStatus({
         success: true,
-        message: `✓ ${res.count} işletme başarıyla 'Arama Listesi'ne aktarıldı!`
+        message: `✓ ${res.message || `${res.count} işletme başarıyla 'Arama Listesi'ne aktarıldı!`}`
       });
+      setShowDistributeModal(false);
       if (onImportComplete) onImportComplete();
     } catch (err) {
       let friendlyError = err.response?.data?.error || err.message;
@@ -755,16 +789,24 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
 
               <button
                 type="button"
-                onClick={handleImport}
+                onClick={() => handleImport()}
                 disabled={importing || selectedIds.size === 0}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                className="bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+                title="Tüm seçili işletmeleri ortak çağrı havuzuna aktar"
               >
-                {importing ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <PlusCircle className="w-4 h-4" />
-                )}
-                <span>Seçilenleri Arama Listesine Aktar ({selectedIds.size})</span>
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Ortak Havuza Ekle ({selectedIds.size})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowDistributeModal(true)}
+                disabled={importing || selectedIds.size === 0}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                title="Seçili işletmeleri çağrı personellerine paylaştır"
+              >
+                <Users className="w-4 h-4" />
+                <span>Personele Paylaştır ({selectedIds.size})</span>
               </button>
             </div>
           </div>
@@ -838,11 +880,20 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                           <MapPin className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
                           <span className="line-clamp-2">{item.address || `${item.district} / ${item.city}`}</span>
                         </div>
-                        {item.lat && item.lng && (
-                          <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
-                            <span>📍 {Number(item.lat).toFixed(4)}, {Number(item.lng).toFixed(4)}</span>
-                          </div>
-                        )}
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {item.is_verified_location === 1 ? (
+                            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-md border border-emerald-200">
+                              ✓ {item.actual_district || item.district} Teyitli
+                            </span>
+                          ) : item.location_warning ? (
+                            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded-md border border-amber-200" title={item.location_warning}>
+                              ⚠️ {item.actual_district ? `${item.actual_district} Bölgesi` : 'Farklı Bölge Uyarısı'}
+                            </span>
+                          ) : null}
+                          {item.lat && item.lng && (
+                            <span className="text-[10px] text-slate-400 font-mono">📍 {Number(item.lat).toFixed(4)}, {Number(item.lng).toFixed(4)}</span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Yıldız Durumu */}
@@ -865,7 +916,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                             <div className="font-bold text-slate-800 flex items-center gap-1.5">
                               {item.phone}
                             </div>
-                            <div>
+                            <div className="flex flex-wrap items-center gap-1">
                               {item.is_mobile ? (
                                 <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
                                   <Smartphone className="w-3 h-3" />
@@ -875,6 +926,11 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                                 <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
                                   <Phone className="w-3 h-3" />
                                   Sabit Hat
+                                </span>
+                              )}
+                              {item.phone_status === 'invalid' && (
+                                <span className="inline-flex items-center gap-0.5 bg-rose-50 text-rose-700 text-[10px] font-bold px-1.5 py-0.5 rounded-md border border-rose-200">
+                                  ⚠️ Hatalı
                                 </span>
                               )}
                             </div>
@@ -890,17 +946,24 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                           
                           {/* Web Sitesi Linki (Doğrulanmış ve Protokollü) */}
                           {item.has_website && item.website ? (
-                            <a
-                              href={item.website}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 text-blue-700 hover:text-blue-900 font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200/80 transition-all max-w-[210px] truncate"
-                              title={item.website}
-                            >
-                              <Globe className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                              <span className="truncate">{item.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}</span>
-                              <ExternalLink className="w-2.5 h-2.5 text-blue-400 shrink-0" />
-                            </a>
+                            <div className="flex items-center gap-1.5">
+                              <a
+                                href={item.website}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-blue-700 hover:text-blue-900 font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200/80 transition-all max-w-[210px] truncate"
+                                title={item.website}
+                              >
+                                <Globe className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                <span className="truncate">{item.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}</span>
+                                <ExternalLink className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+                              </a>
+                              {item.website_status === 'broken' && (
+                                <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 shrink-0" title="Web sitesi yanıt vermiyor veya kapalı">
+                                  ⚠️ Yanıt Vermiyor
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/70 font-semibold text-[11px] w-fit">
                               <Globe className="w-3 h-3 text-amber-500" />
@@ -990,19 +1053,30 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
           </div>
 
           {/* Alt Özet & Seçilenleri Aktar */}
-          <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <span className="text-xs text-slate-500 font-medium">
               Toplam <strong>{results.length}</strong> işletmeden <strong>{selectedIds.size}</strong> tanesi seçili
             </span>
-            <button
-              type="button"
-              onClick={handleImport}
-              disabled={importing || selectedIds.size === 0}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Aday Listesine Kaydet ve Aramaya Başla</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleImport()}
+                disabled={importing || selectedIds.size === 0}
+                className="bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Ortak Havuza Ekle</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDistributeModal(true)}
+                disabled={importing || selectedIds.size === 0}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                <Users className="w-4 h-4" />
+                <span>Personele Paylaştır</span>
+              </button>
+            </div>
           </div>
 
         </div>
@@ -1096,6 +1170,146 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                   </a>
                 )}
               </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* PERSONELLERE PAYLAŞTIRMA MODALI (YÖNETİCİ SEÇİMİ) */}
+      {showDistributeModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-scale-up">
+            
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-indigo-600" />
+                  Yönetici Kontrolü: Personel Paylaştırma
+                </span>
+                <h3 className="font-extrabold text-lg text-slate-900 mt-0.5">
+                  Adayları Personellere Dağıt
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Seçili <strong>{selectedIds.size}</strong> işletme seçtiğiniz personellere eşit paylaştırılacaktır.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDistributeModal(false)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Paylaştırılacak Personelleri Seçin:
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCallerIds(new Set(teamMembers.map(m => m.id)))}
+                    className="text-[11px] text-blue-600 font-bold hover:underline cursor-pointer"
+                  >
+                    Tümünü Seç
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCallerIds(new Set())}
+                    className="text-[11px] text-slate-500 font-bold hover:underline cursor-pointer"
+                  >
+                    Temizle
+                  </button>
+                </div>
+              </div>
+
+              {/* Personel Listesi */}
+              <div className="space-y-2 max-h-60 overflow-y-auto p-1">
+                {teamMembers.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">Ekip üyesi bulunamadı.</p>
+                ) : (
+                  teamMembers.map(member => {
+                    const isChecked = selectedCallerIds.has(member.id);
+                    return (
+                      <div
+                        key={member.id}
+                        onClick={() => toggleCallerSelect(member.id)}
+                        className={`flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer ${
+                          isChecked 
+                            ? 'bg-indigo-50/70 border-indigo-300 shadow-2xs' 
+                            : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div 
+                            className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-2xs"
+                            style={{ backgroundColor: member.color || '#4f46e5' }}
+                          >
+                            {member.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-slate-800">{member.name}</div>
+                            <div className="text-[11px] text-slate-500">{member.role || 'Ekip Üyesi'}</div>
+                          </div>
+                        </div>
+
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}} // onClick parent handle ediyor
+                          className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Dağıtım Önizleme Kutusu */}
+              {selectedCallerIds.size > 0 && selectedIds.size > 0 && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3.5 text-xs text-indigo-950 font-medium">
+                  <div className="flex items-center gap-1.5 font-bold text-indigo-900 mb-1">
+                    <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>Paylaştırma Planı:</span>
+                  </div>
+                  {selectedCallerIds.size === 1 ? (
+                    <span>
+                      Tüm <strong>{selectedIds.size}</strong> işletme seçilen <strong>{teamMembers.find(m => selectedCallerIds.has(m.id))?.name}</strong> personeline atanacak.
+                    </span>
+                  ) : (
+                    <span>
+                      <strong>{selectedIds.size}</strong> işletme, seçtiğiniz <strong>{selectedCallerIds.size}</strong> personele yaklaşık <strong>{Math.ceil(selectedIds.size / selectedCallerIds.size)}</strong> adet düşecek şekilde dengeli dağıtılacak.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Butonlar */}
+            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowDistributeModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={importing || selectedCallerIds.size === 0 || selectedIds.size === 0}
+                onClick={() => handleImport(Array.from(selectedCallerIds))}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {importing ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Users className="w-4 h-4" />
+                )}
+                <span>Paylaştır ve İçe Aktar ({selectedIds.size})</span>
+              </button>
             </div>
 
           </div>

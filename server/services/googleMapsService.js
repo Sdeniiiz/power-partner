@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { analyzePhoneNumber } = require('./phoneAnalyzer');
-const { normalizeUrl, processInstagram } = require('./urlValidator');
+const { normalizeUrl, processInstagram, verifyWebsitesInBatch } = require('./urlValidator');
+const { verifyLocation } = require('./locationValidator');
 
 /**
  * Google Places API (New v1 & Legacy) - Derin Tarama, Doğrulanmış Linkler ve Konum Servisi
@@ -132,17 +133,19 @@ class GoogleMapsService {
 
     const mergedPlaces = Array.from(uniqueMap.values());
 
-    return mergedPlaces.map(p => {
+    const mappedPlaces = mergedPlaces.map(p => {
       const rawPhone = p.nationalPhoneNumber || p.internationalPhoneNumber || '';
       const phoneInfo = analyzePhoneNumber(rawPhone);
       const placeName = p.displayName?.text || 'İşletme';
 
-      // Web sitesi ve Instagram kontrolü (Kırık linkleri engellemek için doğrulama)
+      // 1. Evrensel Konum & İlçe Doğrulama (Aranan ilçe ile gerçek adres kontrolü)
+      const locCheck = verifyLocation(p.formattedAddress || '', p.addressComponents || [], district, city);
+
+      // 2. Web sitesi ve Instagram kontrolü (Kırık linkleri engellemek için doğrulama)
       const rawWebsite = p.websiteUri || '';
       const normalizedWeb = normalizeUrl(rawWebsite);
       const isInstaLink = normalizedWeb.includes('instagram.com') || normalizedWeb.includes('instagr.am');
 
-      // Eğer web sitesi gerçek bir web sitesiyse sakla, Instagram linkiyse web sitesi yok sayılır (Web satışı için fırsat!)
       const validWebsite = (!isInstaLink && normalizedWeb) ? normalizedWeb : '';
       const instaInfo = processInstagram(rawWebsite, placeName, district, city);
 
@@ -167,8 +170,11 @@ class GoogleMapsService {
         place_id: p.id,
         name: placeName,
         category: category,
-        district: district,
+        district: locCheck.actualDistrict || district,
         city: city,
+        actual_district: locCheck.actualDistrict || district,
+        is_verified_location: locCheck.isMatch ? 1 : 0,
+        location_warning: locCheck.warning,
         address: p.formattedAddress || '',
         rating: p.rating || null,
         user_ratings_total: p.userRatingCount || 0,
@@ -176,6 +182,7 @@ class GoogleMapsService {
         raw_phone: rawPhone,
         phone_type: phoneInfo.type,
         phone_type_label: phoneInfo.typeLabel,
+        phone_status: phoneInfo.isValid ? 'valid' : 'invalid',
         is_mobile: phoneInfo.isMobile,
         whatsapp_link: phoneInfo.whatsappLink,
         call_link: phoneInfo.callLink,
@@ -183,7 +190,8 @@ class GoogleMapsService {
         // Doğrulanmış Web Sitesi
         website: validWebsite,
         has_website: Boolean(validWebsite),
-        // Doğrulanmış Instagram Bilgileri
+        website_status: validWebsite ? 'unknown' : 'none',
+        // Doğrulanmış Instagram Bilgileri (Sahte/tahmin link içermez)
         instagram: instaInfo.instagram_url,
         has_instagram: instaInfo.has_instagram,
         instagram_username: instaInfo.username,
@@ -197,6 +205,24 @@ class GoogleMapsService {
         embed_map_url: embedMapUrl
       };
     });
+
+    // Filtre: Eğer kullanıcı belirli bir ilçe aradıysa, adresi başka bir ilçeye ait olanları ayıkla
+    let finalPlaces = mappedPlaces;
+    if (district && district.trim()) {
+      const strictDistrictMatches = mappedPlaces.filter(p => p.is_verified_location === 1);
+      if (strictDistrictMatches.length > 0) {
+        finalPlaces = strictDistrictMatches;
+      }
+    }
+
+    // Web siteleri için hızlı paralel canlılık kontrolü (2.5 sn)
+    try {
+      finalPlaces = await verifyWebsitesInBatch(finalPlaces, 8);
+    } catch (e) {
+      console.warn('Web siteleri kontrolü atlandı:', e.message);
+    }
+
+    return finalPlaces;
   }
 
   /**
@@ -223,7 +249,7 @@ class GoogleMapsService {
           headers: {
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': apiKey,
-            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.location,nextPageToken'
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.location,places.addressComponents,nextPageToken'
           },
           timeout: 9000
         });
@@ -444,6 +470,9 @@ class GoogleMapsService {
         category: category,
         district: district,
         city: city,
+        actual_district: district,
+        is_verified_location: 1,
+        location_warning: null,
         address: `${street} No:${doorNo}, ${district} / ${city}`,
         rating: rating,
         user_ratings_total: reviews,
@@ -451,6 +480,7 @@ class GoogleMapsService {
         raw_phone: phoneNum,
         phone_type: phoneInfo.type,
         phone_type_label: phoneInfo.typeLabel,
+        phone_status: 'valid',
         is_mobile: phoneInfo.isMobile,
         whatsapp_link: phoneInfo.whatsappLink,
         call_link: phoneInfo.callLink,

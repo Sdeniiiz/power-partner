@@ -25,10 +25,13 @@ import {
   RefreshCw,
   Undo2,
   SlidersHorizontal,
-  X
+  X,
+  Users,
+  UserCheck,
+  Bell
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta } from '../api';
+import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers } from '../api';
 
 export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const isAdmin = authUser?.role === 'admin';
@@ -48,9 +51,17 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const [activeCallModal, setActiveCallModal] = useState(null); // Arama yapılan işletme
   const [callNotes, setCallNotes] = useState('');
   const [visitDate, setVisitDate] = useState('');
+  const [recallDate, setRecallDate] = useState('');
+  const [recallTime, setRecallTime] = useState('14:00');
   const [modalScore, setModalScore] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
+
+  // Personel Dağıtımı & Filtreleme
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [assignedCallerFilter, setAssignedCallerFilter] = useState('');
+  const [showBatchDistributeModal, setShowBatchDistributeModal] = useState(false);
+  const [selectedBatchCallerIds, setSelectedBatchCallerIds] = useState(new Set());
 
   const loadFilterMeta = async () => {
     try {
@@ -68,6 +79,9 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
   useEffect(() => {
     loadFilterMeta();
+    getTeamMembers().then(res => {
+      setTeamMembers(res.data || []);
+    }).catch(err => console.error('Ekip üyeleri alınamadı:', err));
   }, []);
 
   const loadLeads = async (customSearch) => {
@@ -82,7 +96,8 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         phone_type: phoneTypeFilter || undefined,
         has_website: websiteFilter !== '' ? websiteFilter : undefined,
         has_instagram: instagramFilter !== '' ? instagramFilter : undefined,
-        min_rating: ratingFilter || undefined
+        min_rating: ratingFilter || undefined,
+        assigned_caller_id: assignedCallerFilter !== '' ? assignedCallerFilter : undefined
       });
       setLeads(res.data || []);
 
@@ -95,7 +110,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter]);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter]);
 
   const activeFiltersCount = [
     districtFilter,
@@ -104,6 +119,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
     websiteFilter,
     instagramFilter,
     ratingFilter,
+    assignedCallerFilter,
     searchQuery
   ].filter(Boolean).length;
 
@@ -114,6 +130,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
     setWebsiteFilter('');
     setInstagramFilter('');
     setRatingFilter('');
+    setAssignedCallerFilter('');
     setSearchQuery('');
     loadLeads('');
   };
@@ -131,6 +148,11 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
       return;
     }
 
+    if (outcome === 'randevu_arama' && !recallDate) {
+      alert('Lütfen tekrar aranacak tarihi seçiniz.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       await recordCall(activeCallModal.id, {
@@ -138,6 +160,8 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         notes: callNotes,
         caller_name: currentUser?.name || 'Operatör',
         visit_date: visitDate || null,
+        recall_date: recallDate || null,
+        recall_time: recallTime || null,
         score: modalScore || 0
       });
 
@@ -145,6 +169,8 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
       setActiveCallModal(null);
       setCallNotes('');
       setVisitDate('');
+      setRecallDate('');
+      setRecallTime('14:00');
       setModalScore(0);
       loadLeads();
       if (onLeadUpdated) onLeadUpdated();
@@ -172,7 +198,30 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
     setActiveCallModal(lead);
     setCallNotes(lead.call_notes || '');
     setVisitDate(lead.visit_date || '');
+    setRecallDate(lead.recall_date || '');
+    setRecallTime(lead.recall_time || '14:00');
     setModalScore(lead.score || 0);
+  };
+
+  const handleBatchDistribute = async () => {
+    if (selectedLeadIds.length === 0 || selectedBatchCallerIds.size === 0) return;
+    setBatchActionLoading(true);
+    try {
+      const res = await distributeLeads({
+        lead_ids: selectedLeadIds,
+        caller_ids: Array.from(selectedBatchCallerIds)
+      });
+      setActionSuccessMsg(res.message || `${selectedLeadIds.length} işletme seçilen personellere başarıyla paylaştırıldı.`);
+      setSelectedLeadIds([]);
+      setShowBatchDistributeModal(false);
+      loadLeads();
+      if (onLeadUpdated) onLeadUpdated();
+      setTimeout(() => setActionSuccessMsg(''), 4000);
+    } catch (err) {
+      alert(`Paylaştırma hatası: ${err.message}`);
+    } finally {
+      setBatchActionLoading(false);
+    }
   };
 
 
@@ -291,14 +340,27 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </button>
 
           <button
+            onClick={() => setStatusFilter('randevu_arama')}
+            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+              statusFilter === 'randevu_arama'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Randevu Alınanlar (Arama)</span>
+          </button>
+
+          <button
             onClick={() => setStatusFilter('randevu')}
-            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all ${
+            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
               statusFilter === 'randevu'
                 ? 'bg-purple-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            Randevu Alınanlar / Ziyaret
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Randevu Alınanlar (Ziyaret)</span>
           </button>
 
           <button
@@ -309,7 +371,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            İletişimsizler (Ulaşılamadı)
+            İletişimsizler
           </button>
 
           <button
@@ -376,7 +438,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-2.5 min-w-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2 sm:gap-2.5 min-w-0">
           {/* İlçe Filtresi */}
           <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -460,6 +522,24 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
             </select>
           </div>
 
+          {/* Atanan Personel Filtresi */}
+          <div className="min-w-0">
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              Atanan Personel
+            </label>
+            <select
+              value={assignedCallerFilter}
+              onChange={(e) => setAssignedCallerFilter(e.target.value)}
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
+            >
+              <option value="">Tüm Personeller</option>
+              <option value="unassigned">👥 Ortak Havuz (Atanmamış)</option>
+              {teamMembers.map(m => (
+                <option key={m.id} value={m.id}>👤 {m.name}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Google Puanı */}
           <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -479,7 +559,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         </div>
       </div>
 
-      {/* YÖNETİCİ ÇOKLU SEÇİM & KUYRUĞA GERİ DÖNDÜRME ÇUBUĞU */}
+      {/* YÖNETİCİ ÇOKLU SEÇİM & PAYLAŞTIRMA / GERİ DÖNDÜRME ÇUBUĞU */}
       {isAdmin && leads.length > 0 && (
         <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
           <div className="flex items-center gap-3">
@@ -502,15 +582,29 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              disabled={selectedLeadIds.length === 0 || batchActionLoading}
+              onClick={() => {
+                setSelectedBatchCallerIds(new Set(teamMembers.map(m => m.id)));
+                setShowBatchDistributeModal(true);
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+              title="Seçili adayları çağrı personellerine paylaştır"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Personele Paylaştır ({selectedLeadIds.length})</span>
+            </button>
+
             <button
               type="button"
               disabled={selectedLeadIds.length === 0 || batchActionLoading}
               onClick={handleBatchRestore}
-              className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+              className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
             >
               <Undo2 className="w-3.5 h-3.5" />
-              <span>Seçilenleri Arama Listesine Döndür ({selectedLeadIds.length})</span>
+              <span>Kuyruğa Döndür ({selectedLeadIds.length})</span>
             </button>
           </div>
         </div>
@@ -572,6 +666,28 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                           <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md">
                             {lead.category}
                           </span>
+
+                          {/* Konum Doğrulama Rozeti */}
+                          {lead.is_verified_location === 1 ? (
+                            <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-md border border-emerald-200">
+                              ✓ {lead.actual_district || lead.district} Teyitli
+                            </span>
+                          ) : lead.actual_district && lead.actual_district !== lead.district ? (
+                            <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded-md border border-amber-200" title="Adreste tespit edilen farklı ilçe/bölge">
+                              ⚠️ {lead.actual_district}
+                            </span>
+                          ) : null}
+
+                          {/* Atanan Personel Rozeti */}
+                          {lead.assigned_caller_name ? (
+                            <span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-md border border-indigo-200 flex items-center gap-1">
+                              👤 {lead.assigned_caller_name}
+                            </span>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-500 text-[10px] font-medium px-2 py-0.5 rounded-md border border-slate-200">
+                              👥 Ortak Havuz
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -640,11 +756,38 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                         className="text-slate-600 hover:text-pink-700 bg-slate-100 hover:bg-pink-50 px-2 py-0.5 rounded-md font-medium flex items-center gap-1 border border-slate-200 transition-colors"
                         title="Bu işletmenin Instagram hesabını ara"
                       >
-                        <InstagramIcon className="w-3 h-3 text-slate-400" />
+                        <InstagramIcon className="w-3.5 h-3.5 text-slate-400" />
                         <span>Insta Ara 🔍</span>
                       </a>
                     )}
                   </div>
+
+                  {/* Telefonla Arama Randevusu / Tekrar Arama Bildirimi */}
+                  {(lead.status === 'randevu_arama' || lead.recall_date) && lead.status !== 'satis' && lead.status !== 'mutlak_olumsuz' && (
+                    <div>
+                      {(() => {
+                        const todayStr = new Date().toISOString().slice(0, 10);
+                        const isTodayOrPast = lead.recall_date && lead.recall_date <= todayStr;
+                        if (isTodayOrPast) {
+                          return (
+                            <div className="mt-3 bg-gradient-to-r from-rose-600 via-red-500 to-amber-500 text-white rounded-xl p-2.5 text-xs font-black flex items-center justify-between shadow-xs animate-pulse">
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="w-4 h-4 text-white shrink-0" />
+                                <span>🔥 BUGÜN ARANACAK: {lead.recall_time ? `Saat ${lead.recall_time}` : 'Bugün'}</span>
+                              </div>
+                              <span className="text-[10px] bg-white/25 px-2 py-0.5 rounded-md uppercase tracking-wider">Arama Zamanı</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="mt-3 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl p-2.5 text-xs font-bold flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
+                            <span>⏰ Arama Randevusu: {new Date(lead.recall_date).toLocaleDateString('tr-TR')} {lead.recall_time ? `Saat: ${lead.recall_time}` : ''}</span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   {/* Randevu / Ziyaret Tarihi Varsa */}
                   {lead.visit_date && (
@@ -844,18 +987,98 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
               </div>
             </div>
 
-            {/* Randevu Tarihi (Eğer randevu seçilecekse) */}
+            {/* 1. Tekrar Arama Planlama (Randevu - Telefonla Arama İçin) */}
+            <div className="mt-3 bg-indigo-50/70 border border-indigo-200 rounded-2xl p-3">
+              <label className="block text-xs font-bold text-indigo-950 mb-1.5 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Tekrar Arama Tarihi & Saati (Telefonla Görüşme):</span>
+              </label>
 
-            <div className="mt-3">
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[10px] text-indigo-700 font-bold uppercase block mb-1">Arama Tarihi:</span>
+                  <input
+                    type="date"
+                    value={recallDate}
+                    onChange={(e) => setRecallDate(e.target.value)}
+                    className="w-full text-xs bg-white border border-indigo-200 rounded-xl px-2.5 py-1.5 font-bold text-slate-800"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] text-indigo-700 font-bold uppercase block mb-1">Arama Saati:</span>
+                  <input
+                    type="time"
+                    value={recallTime}
+                    onChange={(e) => setRecallTime(e.target.value)}
+                    className="w-full text-xs bg-white border border-indigo-200 rounded-xl px-2.5 py-1.5 font-bold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Hızlı Tarih / Saat Butonları */}
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className="text-[10px] text-indigo-600 font-bold self-center mr-1">Hızlı:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    setRecallDate(today);
+                    setRecallTime('15:00');
+                  }}
+                  className="text-[10px] font-bold bg-white text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-lg hover:bg-indigo-100 cursor-pointer"
+                >
+                  Bugün 15:00
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 1);
+                    setRecallDate(d.toISOString().slice(0, 10));
+                    setRecallTime('10:00');
+                  }}
+                  className="text-[10px] font-bold bg-white text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-lg hover:bg-indigo-100 cursor-pointer"
+                >
+                  Yarın 10:00
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 1);
+                    setRecallDate(d.toISOString().slice(0, 10));
+                    setRecallTime('14:00');
+                  }}
+                  className="text-[10px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-lg hover:bg-indigo-700 shadow-2xs cursor-pointer"
+                >
+                  Yarın 14:00 ⭐
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 2);
+                    setRecallDate(d.toISOString().slice(0, 10));
+                    setRecallTime('11:00');
+                  }}
+                  className="text-[10px] font-bold bg-white text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-lg hover:bg-indigo-100 cursor-pointer"
+                >
+                  2 Gün Sonra 11:00
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Randevu / Ziyaret Tarihi (Yüz Yüze Ziyaret İçin) */}
+            <div className="mt-3 bg-purple-50/70 border border-purple-200 rounded-2xl p-3">
+              <label className="block text-xs font-bold text-purple-950 mb-1 flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-purple-600" />
-                Randevu / Ziyaret Tarihi (Randevu ise zorunludur):
+                <span>Yüz Yüze Ziyaret Tarihi & Saati:</span>
               </label>
               <input
                 type="datetime-local"
                 value={visitDate}
                 onChange={(e) => setVisitDate(e.target.value)}
-                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-semibold text-slate-800"
+                className="w-full text-xs bg-white border border-purple-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-800"
               />
             </div>
 
@@ -867,15 +1090,16 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 
-                {/* 1. Doğrudan Satış -> Satış Havuzu */}
+                {/* 1. Randevu Alındı (Telefonla Arama) */}
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={() => handleOutcomeSubmit('satis')}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  onClick={() => handleOutcomeSubmit('randevu_arama')}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  title="Belirlenen tarih ve saatte tekrar aranacak olarak kaydet"
                 >
-                  <CheckCircle className="w-4 h-4" />
-                  <span>🤝 Satış Yapıldı (Satış Havuzuna)</span>
+                  <Clock className="w-4 h-4" />
+                  <span>📞 Randevu (Telefonla Arama)</span>
                 </button>
 
                 {/* 2. Randevu Alındı -> Ziyaret */}
@@ -886,10 +1110,21 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                   className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <Calendar className="w-4 h-4" />
-                  <span>🗓️ Randevu Alındı (Ziyaret Planla)</span>
+                  <span>🗓️ Randevu (Yüz Yüze Ziyaret)</span>
                 </button>
 
-                {/* 3. İletişimsiz Telefon -> Tüm İletişimsizlikler */}
+                {/* 3. Doğrudan Satış -> Satış Havuzu */}
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => handleOutcomeSubmit('satis')}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  <span>🤝 Satış Yapıldı (Satış Havuzuna)</span>
+                </button>
+
+                {/* 4. İletişimsiz Telefon -> Tüm İletişimsizlikler */}
                 <button
                   type="button"
                   disabled={submitting}
@@ -897,15 +1132,15 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                   className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <PhoneOff className="w-4 h-4" />
-                  <span>📵 Ulaşılamadı (İletişimsizler Havuzu)</span>
+                  <span>📵 Ulaşılamadı (İletişimsizler)</span>
                 </button>
 
-                {/* 4. Mutlak Olumsuz -> Süreç Sonu */}
+                {/* 5. Mutlak Olumsuz -> Süreç Sonu */}
                 <button
                   type="button"
                   disabled={submitting}
                   onClick={() => handleOutcomeSubmit('mutlak_olumsuz')}
-                  className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  className="col-span-1 sm:col-span-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-2.5 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <XCircle className="w-4 h-4" />
                   <span>❌ Mutlak Olumsuz (İptal)</span>
@@ -940,6 +1175,144 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* TOPLU PERSONELE PAYLAŞTIRMA MODALI (CALLQUEUE) */}
+      {showBatchDistributeModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-scale-up">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-indigo-600" />
+                  Yönetici Kontrolü: Toplu Personel Paylaştırma
+                </span>
+                <h3 className="font-extrabold text-lg text-slate-900 mt-0.5">
+                  Seçilen İşletmeleri Paylaştır
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Seçili <strong>{selectedLeadIds.length}</strong> işletme seçtiğiniz personellere dağıtılacak.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBatchDistributeModal(false)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Paylaştırılacak Personeller:
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBatchCallerIds(new Set(teamMembers.map(m => m.id)))}
+                    className="text-[11px] text-blue-600 font-bold hover:underline cursor-pointer"
+                  >
+                    Tümünü Seç
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBatchCallerIds(new Set())}
+                    className="text-[11px] text-slate-500 font-bold hover:underline cursor-pointer"
+                  >
+                    Temizle
+                  </button>
+                </div>
+              </div>
+
+              {/* Personel Checkboxları */}
+              <div className="space-y-2 max-h-60 overflow-y-auto p-1">
+                {teamMembers.map(member => {
+                  const isChecked = selectedBatchCallerIds.has(member.id);
+                  return (
+                    <div
+                      key={member.id}
+                      onClick={() => {
+                        const next = new Set(selectedBatchCallerIds);
+                        if (next.has(member.id)) next.delete(member.id);
+                        else next.add(member.id);
+                        setSelectedBatchCallerIds(next);
+                      }}
+                      className={`flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer ${
+                        isChecked 
+                          ? 'bg-indigo-50/70 border-indigo-300 shadow-2xs' 
+                          : 'bg-slate-50/50 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div 
+                          className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-2xs"
+                          style={{ backgroundColor: member.color || '#4f46e5' }}
+                        >
+                          {member.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-800">{member.name}</div>
+                          <div className="text-[11px] text-slate-500">{member.role || 'Ekip Üyesi'}</div>
+                        </div>
+                      </div>
+
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}}
+                        className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Plan Özeti */}
+              {selectedBatchCallerIds.size > 0 && selectedLeadIds.length > 0 && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3.5 text-xs text-indigo-950 font-medium">
+                  <div className="flex items-center gap-1.5 font-bold text-indigo-900 mb-1">
+                    <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>Paylaştırma Planı:</span>
+                  </div>
+                  {selectedBatchCallerIds.size === 1 ? (
+                    <span>
+                      Tüm <strong>{selectedLeadIds.length}</strong> işletme <strong>{teamMembers.find(m => selectedBatchCallerIds.has(m.id))?.name}</strong> personeline atanacak.
+                    </span>
+                  ) : (
+                    <span>
+                      <strong>{selectedLeadIds.length}</strong> işletme, seçtiğiniz <strong>{selectedBatchCallerIds.size}</strong> personele yaklaşık <strong>{Math.ceil(selectedLeadIds.length / selectedBatchCallerIds.size)}</strong> adet düşecek şekilde dengeli paylaştırılacak.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowBatchDistributeModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={batchActionLoading || selectedBatchCallerIds.size === 0 || selectedLeadIds.length === 0}
+                onClick={handleBatchDistribute}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {batchActionLoading ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Users className="w-4 h-4" />
+                )}
+                <span>Paylaştır ve Ata ({selectedLeadIds.length})</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -147,6 +147,7 @@ export default function App() {
           <MemberDashboard
             currentUser={currentUser}
             teamMembers={teamMembers}
+            authUser={authUser}
             onJobUpdated={refreshGlobalData}
           />
         )}

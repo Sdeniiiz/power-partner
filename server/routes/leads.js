@@ -10,24 +10,35 @@ let statsCacheTime = 0;
 let cachedFilterMeta = null;
 let filterMetaCacheTime = 0;
 
-const getCachedStats = async () => {
+const getCachedStats = async (callerId = null) => {
   const now = Date.now();
-  if (cachedStats && (now - statsCacheTime < 25000)) {
+  if (!callerId && cachedStats && (now - statsCacheTime < 25000)) {
     return cachedStats;
   }
-  const stats = await db.get(`
+  let sql = `
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN status = 'arama_listesi' THEN 1 ELSE 0 END) as in_queue,
-      SUM(CASE WHEN status = 'mutlak_olumsuz' THEN 1 ELSE 0 END) as mutlak_olumsuz,
+      SUM(CASE WHEN status = 'randevu_arama' THEN 1 ELSE 0 END) as randevu_arama,
       SUM(CASE WHEN status = 'randevu' THEN 1 ELSE 0 END) as randevu,
+      SUM(CASE WHEN status = 'iletisimsiz' THEN 1 ELSE 0 END) as iletisimsiz,
+      SUM(CASE WHEN status = 'mutlak_olumsuz' THEN 1 ELSE 0 END) as mutlak_olumsuz,
       SUM(CASE WHEN status = 'satis_havuzu' THEN 1 ELSE 0 END) as satis_havuzu,
       SUM(CASE WHEN status = 'is_dagitildi' THEN 1 ELSE 0 END) as is_dagitildi,
-      SUM(CASE WHEN status = 'iletisimsiz' THEN 1 ELSE 0 END) as iletisimsiz
+      SUM(CASE WHEN status = 'randevu_arama' AND recall_date <= DATE('now', 'localtime') THEN 1 ELSE 0 END) as today_recalls
     FROM leads
-  `);
-  cachedStats = stats;
-  statsCacheTime = now;
+  `;
+  const params = [];
+  if (callerId) {
+    sql += ' WHERE assigned_caller_id = ?';
+    params.push(callerId);
+  }
+
+  const stats = await db.get(sql, ...params);
+  if (!callerId) {
+    cachedStats = stats;
+    statsCacheTime = now;
+  }
   return stats;
 };
 
@@ -72,13 +83,28 @@ router.post('/search', async (req, res) => {
   }
 });
 
-// Arama sonuçlarından seçilenleri veritabanına aktar (Arama Listesine ekle)
+// Arama sonuçlarından seçilenleri veritabanına aktar (Arama Listesine ekle & İsteğe bağlı personele paylaştır)
 router.post('/import', async (req, res) => {
   try {
-    const { places } = req.body;
+    const { places, assigned_caller_id, assigned_caller_ids } = req.body;
 
     if (!Array.isArray(places) || places.length === 0) {
       return res.status(400).json({ error: 'Eklenecek işletme listesi boş.' });
+    }
+
+    // Personel listesini ve isim haritasını hazırla
+    let callerList = [];
+    if (Array.isArray(assigned_caller_ids) && assigned_caller_ids.length > 0) {
+      callerList = assigned_caller_ids.map(Number).filter(Boolean);
+    } else if (assigned_caller_id) {
+      callerList = [Number(assigned_caller_id)].filter(Boolean);
+    }
+
+    const callerMap = new Map();
+    if (callerList.length > 0) {
+      const ph = callerList.map(() => '?').join(',');
+      const rows = await db.all(`SELECT id, name FROM team_members WHERE id IN (${ph})`, ...callerList);
+      rows.forEach(r => callerMap.set(r.id, r.name));
     }
 
     const insertSql = `
@@ -87,26 +113,40 @@ router.post('/import', async (req, res) => {
         phone, raw_phone, phone_type, phone_type_label, is_mobile,
         whatsapp_link, call_link, rating, user_ratings_total,
         website, has_website, instagram, has_instagram,
-        maps_url, lat, lng, status
+        maps_url, lat, lng, status,
+        is_verified_location, actual_district, website_status, phone_status,
+        assigned_caller_id, assigned_caller_name
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, 'arama_listesi'
+        ?, ?, ?, 'arama_listesi',
+        ?, ?, ?, ?,
+        ?, ?
       )
       ON CONFLICT(place_id) DO UPDATE SET
         rating = excluded.rating,
         user_ratings_total = excluded.user_ratings_total,
         phone = COALESCE(excluded.phone, leads.phone),
         website = COALESCE(excluded.website, leads.website),
+        assigned_caller_id = COALESCE(excluded.assigned_caller_id, leads.assigned_caller_id),
+        assigned_caller_name = COALESCE(excluded.assigned_caller_name, leads.assigned_caller_name),
         updated_at = CURRENT_TIMESTAMP
     `;
 
     const stmts = [];
-    for (const item of places) {
+    places.forEach((item, idx) => {
       const phoneInfo = analyzePhoneNumber(item.raw_phone || item.phone || '');
       const pId = item.place_id || `gen_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      // Paylaştırma mantığı: Birden fazla seçildiyse sırayla dağıt (round-robin)
+      let callerId = null;
+      let callerName = null;
+      if (callerList.length > 0) {
+        callerId = callerList[idx % callerList.length];
+        callerName = callerMap.get(callerId) || null;
+      }
 
       stmts.push({
         sql: insertSql,
@@ -127,26 +167,95 @@ router.post('/import', async (req, res) => {
           item.rating || null,
           item.user_ratings_total || 0,
           item.website || '',
-          item.website ? 1 : 0,
+          item.has_website ? 1 : 0,
           item.instagram || '',
-          item.instagram ? 1 : 0,
+          item.has_instagram ? 1 : 0,
           item.maps_url || '',
           item.lat || null,
-          item.lng || null
+          item.lng || null,
+          item.is_verified_location !== undefined ? item.is_verified_location : 1,
+          item.actual_district || item.district || '',
+          item.website_status || (item.website ? 'unknown' : 'none'),
+          item.phone_status || (phoneInfo.isValid ? 'valid' : 'invalid'),
+          callerId,
+          callerName
         ]
       });
-    }
+    });
 
     for (let i = 0; i < stmts.length; i += 50) {
       await db.batch(stmts.slice(i, i + 50), 'write');
     }
 
     invalidateCache();
-    res.json({ success: true, count: stmts.length, message: `${stmts.length} işletme arama listesine kaydedildi.` });
+
+    let feedbackMsg = `${stmts.length} işletme arama listesine kaydedildi.`;
+    if (callerList.length > 1) {
+      feedbackMsg += ` (${callerList.length} personele eşit paylaştırıldı)`;
+    } else if (callerList.length === 1) {
+      feedbackMsg += ` (${callerMap.get(callerList[0])} personeline atandı)`;
+    }
+
+    res.json({ success: true, count: stmts.length, message: feedbackMsg });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Adayları seçilen personellere eşit (round-robin) veya tekil olarak paylaştır
+router.post('/distribute', async (req, res) => {
+  try {
+    const { lead_ids, caller_ids, district } = req.body;
+
+    if (!Array.isArray(caller_ids) || caller_ids.length === 0) {
+      return res.status(400).json({ error: 'Lütfen paylaştırılacak en az bir personel seçiniz.' });
+    }
+
+    const cleanCallerIds = caller_ids.map(Number).filter(Boolean);
+    const placeholders = cleanCallerIds.map(() => '?').join(',');
+    const members = await db.all(`SELECT id, name FROM team_members WHERE id IN (${placeholders})`, ...cleanCallerIds);
+    const memberMap = new Map();
+    members.forEach(m => memberMap.set(m.id, m.name));
+
+    let targetLeadIds = [];
+    if (Array.isArray(lead_ids) && lead_ids.length > 0) {
+      targetLeadIds = lead_ids;
+    } else if (district) {
+      const rows = await db.all("SELECT id FROM leads WHERE district = ? AND status = 'arama_listesi'", district);
+      targetLeadIds = rows.map(r => r.id);
+    }
+
+    if (targetLeadIds.length === 0) {
+      return res.status(400).json({ error: 'Paylaştırılacak işletme bulunamadı.' });
+    }
+
+    const stmts = [];
+    targetLeadIds.forEach((leadId, idx) => {
+      const assignedCallerId = cleanCallerIds[idx % cleanCallerIds.length];
+      const assignedCallerName = memberMap.get(assignedCallerId) || 'Personel';
+      stmts.push({
+        sql: 'UPDATE leads SET assigned_caller_id = ?, assigned_caller_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        args: [assignedCallerId, assignedCallerName, leadId]
+      });
+    });
+
+    for (let i = 0; i < stmts.length; i += 50) {
+      await db.batch(stmts.slice(i, i + 50), 'write');
+    }
+
+    invalidateCache();
+
+    res.json({
+      success: true,
+      count: targetLeadIds.length,
+      callerCount: cleanCallerIds.length,
+      message: `${targetLeadIds.length} işletme seçilen ${cleanCallerIds.length} personele başarıyla paylaştırıldı.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // İlçe ve Sektör/Kategori filtre seçeneklerini getir (Hızlı Paralel & Önbellekli)
 router.get('/meta/filters', async (req, res) => {
@@ -180,6 +289,7 @@ router.get('/', async (req, res) => {
     const { 
       status, district, category, phone_type, search,
       has_website, has_instagram, min_rating, min_score,
+      assigned_caller_id, is_today_recall,
       limit = 300 
     } = req.query;
 
@@ -228,13 +338,30 @@ router.get('/', async (req, res) => {
       params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
     }
 
-    query += ' ORDER BY score DESC, id DESC LIMIT ?';
+    // Personel Filtresi (Atanan Çağrı Personeli)
+    if (assigned_caller_id && assigned_caller_id !== 'all') {
+      if (assigned_caller_id === 'unassigned') {
+        query += ' AND (assigned_caller_id IS NULL OR assigned_caller_id = 0)';
+      } else {
+        query += ' AND assigned_caller_id = ?';
+        params.push(Number(assigned_caller_id));
+      }
+    }
+
+    // Bugün Aranacak Randevular Filtresi
+    if (is_today_recall === '1') {
+      query += " AND status = 'randevu_arama' AND (recall_date <= DATE('now', 'localtime') OR recall_date IS NULL)";
+    }
+
+    // Bugün aranacak randevular en üstte gösterilsin
+    query += " ORDER BY CASE WHEN status = 'randevu_arama' AND recall_date <= DATE('now', 'localtime') THEN 0 ELSE 1 END, score DESC, id DESC LIMIT ?";
     params.push(Number(limit));
 
     // Her iki sorguyu eşzamanlı (paralel) çalıştırıp gecikmeyi yarı yarıya düşürüyoruz
+    const callerIdForStats = (assigned_caller_id && assigned_caller_id !== 'all' && assigned_caller_id !== 'unassigned') ? Number(assigned_caller_id) : null;
     const [rows, stats] = await Promise.all([
       db.all(query, ...params),
-      getCachedStats()
+      getCachedStats(callerIdForStats)
     ]);
 
     res.json({ data: rows, stats });
@@ -269,7 +396,7 @@ router.get('/:id', async (req, res) => {
 // Arama sonucunu kaydet ve durumu güncelle (Diyagram akışı)
 router.post('/:id/call', async (req, res) => {
   try {
-    const { outcome, notes, caller_name, visit_date, score, retry_date, products } = req.body;
+    const { outcome, notes, caller_name, visit_date, recall_date, recall_time, score, retry_date, products } = req.body;
     const leadId = req.params.id;
 
     const lead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
@@ -279,6 +406,7 @@ router.post('/:id/call', async (req, res) => {
     if (outcome === 'mutlak_olumsuz') newStatus = 'mutlak_olumsuz';
     else if (outcome === 'iletisimsiz') newStatus = 'iletisimsiz';
     else if (outcome === 'randevu') newStatus = 'randevu';
+    else if (outcome === 'randevu_arama') newStatus = 'randevu_arama'; // ⭐ Arama Randevusu
     else if (outcome === 'ziyaret_olumlu') newStatus = 'satis_havuzu';
     else if (outcome === 'ziyaret_olumsuz') newStatus = 'mutlak_olumsuz';
     else if (outcome === 'satis') newStatus = 'satis_havuzu';
@@ -298,6 +426,8 @@ router.post('/:id/call', async (req, res) => {
         status = ?,
         call_notes = COALESCE(?, call_notes),
         visit_date = CASE WHEN ? IS NOT NULL THEN ? ELSE visit_date END,
+        recall_date = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_date END,
+        recall_time = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_time END,
         score = CASE WHEN ? IS NOT NULL THEN ? ELSE score END,
         retry_date = CASE WHEN ? IS NOT NULL THEN ? ELSE retry_date END,
         products = CASE WHEN ? IS NOT NULL THEN ? ELSE products END,
@@ -309,6 +439,8 @@ router.post('/:id/call', async (req, res) => {
       newStatus, 
       notes || null, 
       visit_date || null, visit_date || null,
+      recall_date || null, recall_date || null,
+      recall_time || null, recall_time || null,
       score !== undefined ? Number(score) : null, score !== undefined ? Number(score) : null,
       retry_date || null, retry_date || null,
       productsStr, productsStr,
@@ -323,6 +455,43 @@ router.post('/:id/call', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Seçilen işletmeleri tek bir personele topluca ata
+router.put('/batch/assign', async (req, res) => {
+  try {
+    const { lead_ids, caller_id } = req.body;
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ error: 'Lütfen en az bir işletme seçiniz.' });
+    }
+
+    let callerName = null;
+    const cleanCallerId = caller_id ? Number(caller_id) : null;
+    if (cleanCallerId) {
+      const member = await db.get('SELECT name FROM team_members WHERE id = ?', cleanCallerId);
+      callerName = member?.name || 'Personel';
+    }
+
+    const stmts = lead_ids.map(id => ({
+      sql: 'UPDATE leads SET assigned_caller_id = ?, assigned_caller_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      args: [cleanCallerId, callerName, id]
+    }));
+
+    for (let i = 0; i < stmts.length; i += 50) {
+      await db.batch(stmts.slice(i, i + 50), 'write');
+    }
+
+    invalidateCache();
+
+    res.json({
+      success: true,
+      count: lead_ids.length,
+      message: `${lead_ids.length} işletme ${callerName ? callerName + ' personeline atandı' : 'ortak havuza alındı'}.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // Tek işletme güncelle (Not, Puan, vb. hızlı düzenleme)
 router.put('/:id', async (req, res) => {

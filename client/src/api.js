@@ -12,7 +12,9 @@ export const saveSettings = (data) => api.post('/settings', data).then(res => re
 export const testApiKey = (key) => api.post('/settings/test-key', { key }).then(res => res.data);
 
 export const searchPlaces = (params) => api.post('/leads/search', params).then(res => res.data);
-export const importLeads = (places) => api.post('/leads/import', { places }).then(res => res.data);
+export const importLeads = (data) => api.post('/leads/import', data.places ? data : { places: data }).then(res => res.data);
+export const distributeLeads = (data) => api.post('/leads/distribute', data).then(res => res.data);
+export const batchAssignLeads = (lead_ids, caller_id) => api.put('/leads/batch/assign', { lead_ids, caller_id }).then(res => res.data);
 export const getLeads = (params) => api.get('/leads', { params }).then(res => res.data);
 export const getLead = (id) => api.get(`/leads/${id}`).then(res => res.data);
 export const recordCall = (id, data) => api.post(`/leads/${id}/call`, data).then(res => res.data);

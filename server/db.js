@@ -130,6 +130,26 @@ async function initDb() {
       );
     `);
 
+    // Yeni Özellikler İçin Kolon Göçleri (Varsa atlar, yoksa ekler)
+    const leadColumnsToAdd = [
+      { name: 'assigned_caller_id', type: 'INTEGER' },
+      { name: 'assigned_caller_name', type: 'TEXT' },
+      { name: 'recall_date', type: 'TEXT' },
+      { name: 'recall_time', type: 'TEXT' },
+      { name: 'is_verified_location', type: 'INTEGER DEFAULT 1' },
+      { name: 'actual_district', type: 'TEXT' },
+      { name: 'website_status', type: "TEXT DEFAULT 'unknown'" },
+      { name: 'phone_status', type: "TEXT DEFAULT 'valid'" }
+    ];
+
+    for (const col of leadColumnsToAdd) {
+      try {
+        await client.execute(`ALTER TABLE leads ADD COLUMN ${col.name} ${col.type}`);
+      } catch (err) {
+        // Zaten varsa sqlite hata verir, güvenle yoksay
+      }
+    }
+
     await client.execute(`
       CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -194,6 +214,8 @@ async function initDb() {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_assigned ON jobs(assigned_member_id);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_lead ON jobs(lead_id);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_jobs_due_date ON jobs(due_date);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_assigned ON leads(assigned_caller_id);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_recall ON leads(recall_date);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_call_logs_lead ON call_logs(lead_id);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_created ON owner_assistant_memory(created_at DESC);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_lead ON owner_assistant_memory(source_lead_id, created_at DESC);');
