@@ -91,35 +91,31 @@ class GoogleMapsService {
    * Places API (New) v1 ile Derin Tarama ve Link Doğrulama
    */
   async searchPlacesV1Deep(baseQuery, district, category, city, apiKey, deepSearch = true) {
-    const queries = [baseQuery];
+    const queryConfigs = [
+      { query: baseQuery, maxPages: deepSearch ? 2 : 1 }
+    ];
 
-    // Derin tarama açıksa kategori varyasyonlarını ekle
+    // Derin tarama açıksa en alakalı 1 varyasyon sorgusunu ekle (aşırı API ve sayfalama gecikmesini önler)
     if (deepSearch) {
-      const lowerCat = category.toLowerCase();
+      const lowerCat = (category || '').toLowerCase();
+      let synonym = null;
       if (lowerCat.includes('kafe') || lowerCat.includes('cafe')) {
-        queries.push(`${district} ${city} cafe`);
-        queries.push(`${district} ${city} kahve`);
-        queries.push(`${district} ${city} coffee`);
-        queries.push(`${district} ${city} pastane`);
+        synonym = `${district} ${city} kahve`;
       } else if (lowerCat.includes('restoran') || lowerCat.includes('restaurant')) {
-        queries.push(`${district} ${city} restaurant`);
-        queries.push(`${district} ${city} lokanta`);
-        queries.push(`${district} ${city} kebap`);
-        queries.push(`${district} ${city} yemek`);
+        synonym = `${district} ${city} lokanta`;
       } else if (lowerCat.includes('giyim')) {
-        queries.push(`${district} ${city} butik`);
-        queries.push(`${district} ${city} giyim`);
-        queries.push(`${district} ${city} moda`);
+        synonym = `${district} ${city} butik`;
       } else if (lowerCat.includes('kuafor') || lowerCat.includes('kuaför')) {
-        queries.push(`${district} ${city} kuaför`);
-        queries.push(`${district} ${city} güzellik salonu`);
+        synonym = `${district} ${city} güzellik salonu`;
       } else if (lowerCat.includes('otel')) {
-        queries.push(`${district} ${city} butik otel`);
-        queries.push(`${district} ${city} pansiyon`);
+        synonym = `${district} ${city} butik otel`;
+      }
+      if (synonym && synonym.toLowerCase() !== baseQuery.toLowerCase()) {
+        queryConfigs.push({ query: synonym, maxPages: 1 });
       }
     }
 
-    const queryPromises = queries.map(q => this.fetchV1PagesForQuery(q, apiKey, deepSearch ? 3 : 1));
+    const queryPromises = queryConfigs.map(cfg => this.fetchV1PagesForQuery(cfg.query, apiKey, cfg.maxPages));
     const queryResults = await Promise.all(queryPromises);
 
     const uniqueMap = new Map();
@@ -215,9 +211,9 @@ class GoogleMapsService {
       }
     }
 
-    // Web siteleri için hızlı paralel canlılık kontrolü (2.5 sn)
+    // Web siteleri için hızlı paralel canlılık kontrolü (maks 1.8 sn global süre)
     try {
-      finalPlaces = await verifyWebsitesInBatch(finalPlaces, 8);
+      finalPlaces = await verifyWebsitesInBatch(finalPlaces, 1800);
     } catch (e) {
       console.warn('Web siteleri kontrolü atlandı:', e.message);
     }
@@ -228,7 +224,7 @@ class GoogleMapsService {
   /**
    * Tek bir metin sorgusu için Places API v1 sayfalarını çeker
    */
-  async fetchV1PagesForQuery(textQuery, apiKey, maxPages = 3) {
+  async fetchV1PagesForQuery(textQuery, apiKey, maxPages = 2) {
     let places = [];
     let pageToken = null;
     let pageCount = 0;
@@ -251,7 +247,7 @@ class GoogleMapsService {
             'X-Goog-Api-Key': apiKey,
             'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.location,places.addressComponents,nextPageToken'
           },
-          timeout: 9000
+          timeout: 6000
         });
 
         const batch = response.data?.places || [];
