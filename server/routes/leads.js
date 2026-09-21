@@ -322,7 +322,7 @@ router.get('/', async (req, res) => {
       status, district, category, phone_type, search,
       has_website, has_instagram, min_rating, min_score,
       assigned_caller_id, is_today_recall,
-      limit = 300 
+      limit = 2000 
     } = req.query;
 
     let query = 'SELECT * FROM leads WHERE 1=1';

@@ -38,7 +38,8 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const isAdmin = authUser?.role === 'admin';
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('arama_listesi'); // Varsayılan: Arama Kuyruğu
+  const [statusFilter, setStatusFilter] = useState('all'); // Varsayılan: Tümü (başlangıçta tüm 243 işletmeyi eksiksiz gösterir)
+  const [leadStats, setLeadStats] = useState(null);
   const [districtFilter, setDistrictFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [phoneTypeFilter, setPhoneTypeFilter] = useState('');
@@ -99,9 +100,13 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         has_website: websiteFilter !== '' ? websiteFilter : undefined,
         has_instagram: instagramFilter !== '' ? instagramFilter : undefined,
         min_rating: ratingFilter || undefined,
-        assigned_caller_id: assignedCallerFilter !== '' ? assignedCallerFilter : undefined
+        assigned_caller_id: assignedCallerFilter !== '' ? assignedCallerFilter : undefined,
+        limit: 2000
       });
       setLeads(res.data || []);
+      if (res.stats) {
+        setLeadStats(res.stats);
+      }
 
     } catch (err) {
       console.error('Leads yüklenirken hata:', err);
@@ -338,21 +343,42 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
       <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         
         {/* Durum Sekmeleri (Diyagram Düğümleri) */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setStatusFilter('all')}
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+              statusFilter === 'all'
+                ? 'bg-slate-800 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <span>Tümü</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'all' ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700'
+            }`}>
+              {leadStats ? (leadStats.total ?? 0) : leads.length}
+            </span>
+          </button>
+
           <button
             onClick={() => setStatusFilter('arama_listesi')}
-            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all ${
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
               statusFilter === 'arama_listesi'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            Arama Bekleyenler
+            <span>Arama Bekleyenler</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'arama_listesi' ? 'bg-white/25 text-white' : 'bg-blue-100 text-blue-800'
+            }`}>
+              {leadStats?.in_queue ?? 0}
+            </span>
           </button>
 
           <button
             onClick={() => setStatusFilter('randevu_arama')}
-            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
               statusFilter === 'randevu_arama'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -360,11 +386,16 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           >
             <Clock className="w-3.5 h-3.5" />
             <span>Randevu Alınanlar (Arama)</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'randevu_arama' ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-800'
+            }`}>
+              {leadStats?.randevu_arama ?? 0}
+            </span>
           </button>
 
           <button
             onClick={() => setStatusFilter('randevu')}
-            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
               statusFilter === 'randevu'
                 ? 'bg-purple-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -372,39 +403,43 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           >
             <Calendar className="w-3.5 h-3.5" />
             <span>Randevu Alınanlar (Ziyaret)</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'randevu' ? 'bg-white/25 text-white' : 'bg-purple-100 text-purple-800'
+            }`}>
+              {leadStats?.randevu ?? 0}
+            </span>
           </button>
 
           <button
             onClick={() => setStatusFilter('iletisimsiz')}
-            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all ${
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
               statusFilter === 'iletisimsiz'
                 ? 'bg-amber-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            İletişimsizler
+            <span>İletişimsizler</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'iletisimsiz' ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-900'
+            }`}>
+              {leadStats?.iletisimsiz ?? 0}
+            </span>
           </button>
 
           <button
             onClick={() => setStatusFilter('mutlak_olumsuz')}
-            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all ${
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
               statusFilter === 'mutlak_olumsuz'
                 ? 'bg-red-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            Mutlak Olumsuz
-          </button>
-
-          <button
-            onClick={() => setStatusFilter('all')}
-            className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all ${
-              statusFilter === 'all'
-                ? 'bg-slate-800 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            Tümü
+            <span>Mutlak Olumsuz</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'mutlak_olumsuz' ? 'bg-white/25 text-white' : 'bg-red-100 text-red-800'
+            }`}>
+              {leadStats?.mutlak_olumsuz ?? 0}
+            </span>
           </button>
         </div>
 
@@ -916,7 +951,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                     </button>
 
                     {/* SİSTEM YÖNETİCİSİ: KUYRUĞA GERİ DÖNDÜR BUTONU (TEKİL) */}
-                    {isAdmin && (statusFilter !== 'arama_listesi' || lead.status !== 'arama_listesi') && (
+                    {isAdmin && lead.status !== 'arama_listesi' && (
                       <button
                         type="button"
                         onClick={() => handleRestoreToQueue(lead.id)}
