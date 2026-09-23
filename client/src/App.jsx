@@ -47,10 +47,9 @@ export default function App() {
 
   const handleLoginSuccess = (user) => {
     setAuthUser(user);
-    // Personel ise ekrandaki aktif çalışan olarak eşle
-    if (user && teamMembers.length > 0) {
-      const matched = teamMembers.find(m => m.name.toLowerCase() === user.name.toLowerCase());
-      if (matched) setCurrentUser(matched);
+    if (user) {
+      const matched = teamMembers?.find(m => m.name.toLowerCase() === user.name.toLowerCase());
+      setCurrentUser(matched || { name: user.name, role: user.role });
     }
   };
 
@@ -68,16 +67,10 @@ export default function App() {
       setTeamMembers(membersRes.data || []);
       setCategories(catsRes.data || []);
 
-      // Eğer giriş yapan kişi personel ise, varsayılan olarak onu seç
-      if (authUser && authUser.role !== 'admin' && membersRes.data) {
-        const matched = membersRes.data.find(m => m.name.toLowerCase() === authUser.name.toLowerCase());
-        if (matched) {
-          setCurrentUser(matched);
-        } else if (!currentUser && membersRes.data.length > 0) {
-          setCurrentUser(membersRes.data[0]);
-        }
-      } else if (!currentUser && membersRes.data && membersRes.data.length > 0) {
-        setCurrentUser(membersRes.data[0]);
+      // Giriş yapan kullanıcıyı her zaman kendi hesabıyla eşle (Asla varsayılan ilk kişiye atama yapma)
+      if (authUser) {
+        const matched = membersRes.data?.find(m => m.name.toLowerCase() === authUser.name.toLowerCase());
+        setCurrentUser(matched || { name: authUser.name, role: authUser.role });
       }
     } catch (err) {
       console.error('Veriler yüklenirken hata:', err);
