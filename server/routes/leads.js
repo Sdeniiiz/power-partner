@@ -34,12 +34,23 @@ const getCachedStats = async (callerId = null) => {
     params.push(callerId);
   }
 
-  const stats = await db.get(sql, ...params);
+  const [stats, callerSummary] = await Promise.all([
+    db.get(sql, ...params),
+    db.all(`
+      SELECT caller_name, COUNT(*) as call_count, COUNT(DISTINCT lead_id) as lead_count
+      FROM call_logs
+      WHERE caller_name IS NOT NULL AND TRIM(caller_name) != ''
+      GROUP BY caller_name
+      ORDER BY call_count DESC
+    `)
+  ]);
+
+  const fullStats = { ...(stats || {}), caller_summary: callerSummary || [] };
   if (!callerId) {
-    cachedStats = stats;
+    cachedStats = fullStats;
     statsCacheTime = now;
   }
-  return stats;
+  return fullStats;
 };
 
 const invalidateCache = () => {
@@ -297,14 +308,16 @@ router.get('/meta/filters', async (req, res) => {
       return res.json(cachedFilterMeta);
     }
 
-    const [districtRows, categoryRows] = await Promise.all([
+    const [districtRows, categoryRows, callerRows] = await Promise.all([
       db.all(`SELECT DISTINCT district FROM leads WHERE district IS NOT NULL AND TRIM(district) != '' ORDER BY district ASC`),
-      db.all(`SELECT DISTINCT category FROM leads WHERE category IS NOT NULL AND TRIM(category) != '' ORDER BY category ASC`)
+      db.all(`SELECT DISTINCT category FROM leads WHERE category IS NOT NULL AND TRIM(category) != '' ORDER BY category ASC`),
+      db.all(`SELECT caller_name, COUNT(*) as call_count, COUNT(DISTINCT lead_id) as lead_count FROM call_logs WHERE caller_name IS NOT NULL AND TRIM(caller_name) != '' GROUP BY caller_name ORDER BY call_count DESC`)
     ]);
 
     const result = {
       districts: districtRows.map(r => r.district),
-      categories: categoryRows.map(r => r.category)
+      categories: categoryRows.map(r => r.category),
+      callers: callerRows || []
     };
 
     cachedFilterMeta = result;
@@ -321,7 +334,7 @@ router.get('/', async (req, res) => {
     const { 
       status, district, category, phone_type, search,
       has_website, has_instagram, min_rating, min_score,
-      assigned_caller_id, is_today_recall,
+      assigned_caller_id, called_by, is_today_recall,
       limit = 2000 
     } = req.query;
 
@@ -378,6 +391,12 @@ router.get('/', async (req, res) => {
         query += ' AND assigned_caller_id = ?';
         params.push(Number(assigned_caller_id));
       }
+    }
+
+    // Arama Yapan / Not Yazan Personel Filtresi
+    if (called_by && called_by !== 'all' && called_by.trim() !== '') {
+      query += ' AND id IN (SELECT DISTINCT lead_id FROM call_logs WHERE caller_name = ?)';
+      params.push(called_by.trim());
     }
 
     // Bugün Aranacak Randevular Filtresi
@@ -443,11 +462,33 @@ router.post('/:id/call', async (req, res) => {
     else if (outcome === 'ziyaret_olumsuz') newStatus = 'mutlak_olumsuz';
     else if (outcome === 'satis') newStatus = 'satis_havuzu';
 
+    // Personel adını belirle ve notu "Sezai: ..." şeklinde biçimlendir
+    const author = (caller_name || 'Operatör').trim();
+    let formattedNote = '';
+    if (notes && notes.trim()) {
+      const cleanNote = notes.trim();
+      if (cleanNote.toLowerCase().startsWith(author.toLowerCase() + ':')) {
+        formattedNote = cleanNote;
+      } else {
+        formattedNote = `${author}: ${cleanNote}`;
+      }
+    }
+
     // Arama günlüğü ekle
     await db.run(`
       INSERT INTO call_logs (lead_id, outcome, caller_name, notes)
       VALUES (?, ?, ?, ?)
-    `, leadId, outcome, caller_name || 'Operatör', notes || '');
+    `, leadId, outcome, author, formattedNote || notes || '');
+
+    // Mevcut call_notes ile birleştir (öncekileri silmeyip yeni satır olarak alta ekle)
+    let newCallNotes = lead.call_notes || '';
+    if (formattedNote) {
+      if (newCallNotes && newCallNotes.trim()) {
+        newCallNotes = newCallNotes.trim() + '\n' + formattedNote;
+      } else {
+        newCallNotes = formattedNote;
+      }
+    }
 
     // Lead'i güncelle
     const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
@@ -456,7 +497,7 @@ router.post('/:id/call', async (req, res) => {
       UPDATE leads
       SET
         status = ?,
-        call_notes = COALESCE(?, call_notes),
+        call_notes = ?,
         visit_date = CASE WHEN ? IS NOT NULL THEN ? ELSE visit_date END,
         recall_date = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_date END,
         recall_time = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_time END,
@@ -469,7 +510,7 @@ router.post('/:id/call', async (req, res) => {
       WHERE id = ?
     `,
       newStatus, 
-      notes || null, 
+      newCallNotes || lead.call_notes || null, 
       visit_date || null, visit_date || null,
       recall_date || null, recall_date || null,
       recall_time || null, recall_time || null,

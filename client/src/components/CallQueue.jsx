@@ -46,7 +46,8 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const [websiteFilter, setWebsiteFilter] = useState('');
   const [instagramFilter, setInstagramFilter] = useState('');
   const [ratingFilter, setRatingFilter] = useState('');
-  const [metaFilters, setMetaFilters] = useState({ districts: [], categories: [] });
+  const [metaFilters, setMetaFilters] = useState({ districts: [], categories: [], callers: [] });
+  const [calledByFilter, setCalledByFilter] = useState('');
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,7 +73,8 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
       if (res) {
         setMetaFilters({
           districts: res.districts || [],
-          categories: res.categories || []
+          categories: res.categories || [],
+          callers: res.callers || []
         });
       }
     } catch (err) {
@@ -101,6 +103,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         has_instagram: instagramFilter !== '' ? instagramFilter : undefined,
         min_rating: ratingFilter || undefined,
         assigned_caller_id: assignedCallerFilter !== '' ? assignedCallerFilter : undefined,
+        called_by: calledByFilter !== '' ? calledByFilter : undefined,
         limit: 2000
       });
       setLeads(res.data || []);
@@ -117,7 +120,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter]);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter]);
 
   const activeFiltersCount = [
     districtFilter,
@@ -127,6 +130,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
     instagramFilter,
     ratingFilter,
     assignedCallerFilter,
+    calledByFilter,
     searchQuery
   ].filter(Boolean).length;
 
@@ -138,6 +142,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
     setInstagramFilter('');
     setRatingFilter('');
     setAssignedCallerFilter('');
+    setCalledByFilter('');
     setSearchQuery('');
     loadLeads('');
   };
@@ -162,10 +167,11 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
     setSubmitting(true);
     try {
+      const activeCallerName = authUser?.name || currentUser?.name || 'Operatör';
       await recordCall(activeCallModal.id, {
         outcome,
         notes: callNotes,
-        caller_name: currentUser?.name || 'Operatör',
+        caller_name: activeCallerName,
         visit_date: visitDate || null,
         recall_date: recallDate || null,
         recall_time: recallTime || null,
@@ -180,6 +186,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
       setRecallTime('14:00');
       setModalScore(0);
       loadLeads();
+      loadFilterMeta();
       if (onLeadUpdated) onLeadUpdated();
 
       setTimeout(() => setActionSuccessMsg(''), 4000);
@@ -203,7 +210,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
   const openCallModal = (lead) => {
     setActiveCallModal(lead);
-    setCallNotes(lead.call_notes || '');
+    setCallNotes('');
     setVisitDate(lead.visit_date || '');
     setRecallDate(lead.recall_date || '');
     setRecallTime(lead.recall_time || '14:00');
@@ -484,7 +491,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2 sm:gap-2.5 min-w-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-2.5 min-w-0">
           {/* İlçe Filtresi */}
           <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -586,6 +593,25 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
             </select>
           </div>
 
+          {/* Arama Yapan / Not Yazan Personel Filtresi */}
+          <div className="min-w-0">
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1 truncate" title="Arama Yapan / Not Yazan Personel">
+              Not Yazan / Arayan
+            </label>
+            <select
+              value={calledByFilter}
+              onChange={(e) => setCalledByFilter(e.target.value)}
+              className="w-full min-w-0 max-w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
+            >
+              <option value="">Tüm Arayanlar</option>
+              {(metaFilters.callers || leadStats?.caller_summary || []).map(c => (
+                <option key={c.caller_name} value={c.caller_name}>
+                  ✍️ {c.caller_name} ({c.call_count} Arama / {c.lead_count} İşletme)
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Google Puanı */}
           <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -604,6 +630,45 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </div>
         </div>
       </div>
+
+      {/* SEÇİLEN PERSONELİN ARAMA VE NOT İSTATİSTİĞİ ÖZET BİLGİ KARTI */}
+      {calledByFilter && (
+        <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-indigo-50 border border-indigo-200/90 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-extrabold text-base shadow-sm shadow-indigo-200 shrink-0">
+              ✍️
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-slate-900 text-sm sm:text-base">
+                  {calledByFilter} Personelinin Görüşme Notları & Aramaları
+                </span>
+                <span className="bg-indigo-100 text-indigo-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                  Filtrelendi
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Yalnızca <strong>{calledByFilter}</strong> tarafından arama yapılmış veya not yazılmış işletmeler listeleniyor.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
+            <div className="bg-white border border-indigo-200 px-3.5 py-2 rounded-xl text-center shadow-2xs">
+              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Toplam Arama</span>
+              <span className="font-extrabold text-sm text-indigo-700">
+                📞 {(metaFilters.callers || leadStats?.caller_summary || []).find(c => c.caller_name?.toLowerCase() === calledByFilter?.toLowerCase())?.call_count || leads.length}
+              </span>
+            </div>
+            <div className="bg-white border border-indigo-200 px-3.5 py-2 rounded-xl text-center shadow-2xs">
+              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">İşletme Sayısı</span>
+              <span className="font-extrabold text-sm text-blue-700">
+                🏢 {leads.length}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* YÖNETİCİ ÇOKLU SEÇİM & PAYLAŞTIRMA / GERİ DÖNDÜRME ÇUBUĞU */}
       {isAdmin && leads.length > 0 && (
@@ -844,10 +909,36 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                     </div>
                   )}
 
-                  {/* Son Arama Notu */}
+                  {/* Görüşme Notları Geçmişi (Personel Bazlı) */}
                   {lead.call_notes && (
-                    <div className="mt-2 text-xs bg-slate-50 p-2 rounded-lg text-slate-600 italic">
-                      " {lead.call_notes} "
+                    <div className="mt-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Görüşme Notları ({lead.call_notes.split('\n').filter(Boolean).length}):
+                        </span>
+                      </div>
+                      <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                        {lead.call_notes.split('\n').filter(Boolean).map((noteLine, idx) => {
+                          const colonIdx = noteLine.indexOf(':');
+                          const hasAuthor = colonIdx > -1 && colonIdx < 35;
+                          const author = hasAuthor ? noteLine.slice(0, colonIdx).trim() : null;
+                          const noteContent = hasAuthor ? noteLine.slice(colonIdx + 1).trim() : noteLine;
+
+                          return (
+                            <div key={idx} className="bg-slate-50 border border-slate-200/90 rounded-xl p-2 text-xs flex flex-col gap-0.5">
+                              {author && (
+                                <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-700">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0"></span>
+                                  <span>{author}</span>
+                                </div>
+                              )}
+                              <p className="text-slate-700 font-medium text-[11px] leading-relaxed italic pl-3">
+                                "{noteContent}"
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
@@ -997,15 +1088,46 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
               </button>
             </div>
 
-            {/* Görüşme Notu */}
-            <div className="mt-4">
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Görüşme Notu:
-              </label>
+            {/* Önceki Görüşme Notları / Geçmiş */}
+            {activeCallModal.call_notes && (
+              <div className="mt-3.5">
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Önceki Görüşme Notları / Geçmiş ({activeCallModal.call_notes.split('\n').filter(Boolean).length})</span>
+                </label>
+                <div className="max-h-32 overflow-y-auto space-y-1.5 bg-slate-50 border border-slate-200 rounded-xl p-2.5 scrollbar-thin">
+                  {activeCallModal.call_notes.split('\n').filter(Boolean).map((line, i) => {
+                    const colonIdx = line.indexOf(':');
+                    const hasAuthor = colonIdx > -1 && colonIdx < 35;
+                    const author = hasAuthor ? line.slice(0, colonIdx).trim() : null;
+                    const content = hasAuthor ? line.slice(colonIdx + 1).trim() : line;
+                    return (
+                      <div key={i} className="text-xs bg-white border border-slate-200/90 rounded-lg p-2 text-slate-700 shadow-2xs">
+                        {author && (
+                          <span className="font-bold text-indigo-700 mr-1.5">[{author}]:</span>
+                        )}
+                        <span className="italic">{content}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Yeni Görüşme Notu */}
+            <div className="mt-3.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700">
+                  Yeni Görüşme Notu:
+                </label>
+                <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                  ✍️ Not Yazan: {authUser?.name || currentUser?.name || 'Operatör'}
+                </span>
+              </div>
               <textarea
                 value={callNotes}
                 onChange={(e) => setCallNotes(e.target.value)}
-                placeholder="Örn: Yetkili Ali Bey ile görüşüldü, yeni web sitesi ve Instagram yönetimi istiyorlar..."
+                placeholder={`${authUser?.name || currentUser?.name || 'Operatör'} olarak bu arama için yeni görüşme notunuzu buraya yazın...`}
                 rows={3}
                 className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
               />

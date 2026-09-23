@@ -217,6 +217,7 @@ async function initDb() {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_assigned ON leads(assigned_caller_id);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_recall ON leads(recall_date);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_call_logs_lead ON call_logs(lead_id);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_call_logs_caller ON call_logs(caller_name);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_created ON owner_assistant_memory(created_at DESC);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_lead ON owner_assistant_memory(source_lead_id, created_at DESC);');
 
