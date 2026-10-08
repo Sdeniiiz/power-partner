@@ -32,7 +32,7 @@ import {
   Building2
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers } from '../api';
+import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl } from '../api';
 
 export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const isAdmin = authUser?.role === 'admin';
@@ -59,6 +59,16 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const [modalScore, setModalScore] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
+
+  // 1. ADIM: Kademeli Yükleme (Pagination - 25'li Gösterim)
+  const [visibleLimit, setVisibleLimit] = useState(25);
+
+  // 2. ADIM: Hızlı Dağıtım Çubuğu State
+  const [quickAssignTargetUser, setQuickAssignTargetUser] = useState('');
+  const [quickAssignBatchCount, setQuickAssignBatchCount] = useState(25);
+
+  // 3. ADIM: Bulutfon VoIP Arama State
+  const [bulutfonCalling, setBulutfonCalling] = useState(false);
 
   // Personel Dağıtımı & Filtreleme
   const [teamMembers, setTeamMembers] = useState([]);
@@ -121,6 +131,141 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   useEffect(() => {
     loadLeads();
   }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter]);
+
+  // Filtreler veya arama değiştiğinde 25'li kademeli yüklemeyi sıfırla
+  useEffect(() => {
+    setVisibleLimit(25);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, searchQuery]);
+
+  // 2. ADIM: Hızlı Dağıtım Fonksiyonları
+  const handleQuickAssignToUser = async () => {
+    if (!quickAssignTargetUser) {
+      alert('Lütfen bir personel seçiniz.');
+      return;
+    }
+    const count = parseInt(quickAssignBatchCount) || 25;
+    const candidateIds = selectedLeadIds.length > 0 
+      ? selectedLeadIds.slice(0, count) 
+      : leads.filter(l => !l.assigned_caller_id).slice(0, count).map(l => l.id);
+    
+    if (candidateIds.length === 0) {
+      alert('Atanacak uygun işletme bulunamadı.');
+      return;
+    }
+
+    setBatchActionLoading(true);
+    try {
+      const res = await distributeLeads({
+        lead_ids: candidateIds,
+        caller_ids: [Number(quickAssignTargetUser)]
+      });
+      setActionSuccessMsg(res.message || `${candidateIds.length} işletme personele atandı ve bildirim gönderildi.`);
+      setSelectedLeadIds([]);
+      loadLeads();
+      setTimeout(() => setActionSuccessMsg(''), 4000);
+    } catch (err) {
+      alert(`Dağıtım hatası: ${err.message}`);
+    } finally {
+      setBatchActionLoading(false);
+    }
+  };
+
+  const handleQuickAutoDistribute = async () => {
+    if (teamMembers.length === 0) {
+      alert('Sistemde kayıtlı personel bulunamadı.');
+      return;
+    }
+    const count = parseInt(quickAssignBatchCount) || 0;
+    let candidateIds = selectedLeadIds.length > 0 
+      ? selectedLeadIds 
+      : leads.filter(l => !l.assigned_caller_id).map(l => l.id);
+
+    if (candidateIds.length === 0) {
+      candidateIds = leads.map(l => l.id);
+    }
+
+    if (count > 0 && candidateIds.length > count) {
+      candidateIds = candidateIds.slice(0, count);
+    }
+
+    if (candidateIds.length === 0) {
+      alert('Paylaştırılacak işletme bulunamadı.');
+      return;
+    }
+
+    setBatchActionLoading(true);
+    try {
+      const res = await distributeLeads({
+        lead_ids: candidateIds,
+        caller_ids: teamMembers.map(m => m.id)
+      });
+      setActionSuccessMsg(res.message || `${candidateIds.length} işletme personellere eşit paylaştırıldı ve bildirim gönderildi.`);
+      setSelectedLeadIds([]);
+      loadLeads();
+      setTimeout(() => setActionSuccessMsg(''), 4000);
+    } catch (err) {
+      alert(`Eşit dağıtım hatası: ${err.message}`);
+    } finally {
+      setBatchActionLoading(false);
+    }
+  };
+
+  // 3. ADIM: Bulutfon Arama Tetikleyicisi (Seçenek B: Uygulama & API Desteği)
+  const userBulutfonEnabled = Boolean(
+    authUser?.bulutfon_enabled === 1 || 
+    authUser?.bulutfon_enabled === true || 
+    currentUser?.bulutfon_enabled === 1 || 
+    currentUser?.bulutfon_enabled === true || 
+    authUser?.bulutfon_ext || 
+    currentUser?.bulutfon_ext
+  );
+  const userBulutfonMode = authUser?.bulutfon_mode || currentUser?.bulutfon_mode || 'app';
+  const userExt = authUser?.bulutfon_ext || currentUser?.bulutfon_ext;
+  const userApiKey = authUser?.bulutfon_api_key || currentUser?.bulutfon_api_key;
+
+  const handleBulutfonCallClick = (e, lead) => {
+    // Görüşme notu ve karar modalını hemen aç
+    openCallModal(lead);
+
+    // Eğer kullanıcı API modunu seçmişse ve API bilgileri varsa santral araması yap
+    if (userBulutfonMode === 'api' && userApiKey && userExt) {
+      e.preventDefault();
+      triggerBulutfonApiCall(lead.phone, lead.name);
+    }
+    // Aksi takdirde <a> etiketi doğrudan Bulutfon Plus / VoIP uygulamasını arama ekranıyla açar
+  };
+
+  const triggerBulutfonApiCall = async (phone, bizName) => {
+    if (!phone || phone === 'Numara Yok') {
+      alert('Bu işletmenin telefon numarası bulunamadı.');
+      return;
+    }
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    if (!cleanPhone) {
+      alert('Geçerli telefon numarası formatı bulunamadı.');
+      return;
+    }
+
+    try {
+      setBulutfonCalling(true);
+      const res = await triggerBulutfonCallApi({
+        destination: cleanPhone,
+        apiKey: userApiKey,
+        extension: userExt
+      });
+
+      if (res.success) {
+        alert(`📞 Bulutfon Santrali: Dahiliniz (${res.extension || userExt || 'Santral'}) aranıyor!\n\nAhizeyi/kulaklığı kaldırdığınızda "${bizName}" (${cleanPhone}) müşterisine bağlanacaksınız.`);
+      } else {
+        window.location.href = `tel:${cleanPhone}`;
+      }
+    } catch (err) {
+      console.warn('Bulutfon API çağrılamadı, cihaz aramasına yönlendiriliyor:', err);
+      window.location.href = `tel:${cleanPhone}`;
+    } finally {
+      setBulutfonCalling(false);
+    }
+  };
 
   const activeFiltersCount = [
     districtFilter,
@@ -670,6 +815,70 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         </div>
       )}
 
+      {/* 2. ADIM: Admin Günlük Arama Dağıtımı & Bildirim Çubuğu */}
+      {isAdmin && leads.length > 0 && (
+        <div className="bg-gradient-to-r from-blue-50/90 via-indigo-50/80 to-purple-50/90 border border-blue-200/90 rounded-2xl p-3 sm:p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <span className="font-extrabold text-xs sm:text-sm text-slate-900 flex items-center gap-1.5">
+              <span>📢</span> Günlük Arama Dağıtımı:
+            </span>
+            <span className="bg-blue-100 text-blue-800 text-[11px] font-bold px-2 py-0.5 rounded-md">
+              {leads.length} İşletme Listede
+            </span>
+            {selectedLeadIds.length > 0 && (
+              <span className="bg-indigo-100 text-indigo-800 text-[11px] font-bold px-2 py-0.5 rounded-md">
+                ({selectedLeadIds.length} seçildi)
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={quickAssignTargetUser}
+              onChange={(e) => setQuickAssignTargetUser(e.target.value)}
+              className="text-xs bg-white border border-slate-300 rounded-xl px-2.5 py-2 font-semibold text-slate-700 shadow-2xs focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">👤 Personel Seçiniz...</option>
+              {teamMembers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.role || 'Personel'})
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="number"
+              value={quickAssignBatchCount}
+              onChange={(e) => setQuickAssignBatchCount(e.target.value)}
+              placeholder="Adet (örn: 25)"
+              min="1"
+              className="w-24 sm:w-28 text-xs bg-white border border-slate-300 rounded-xl px-2.5 py-2 font-semibold text-slate-700 shadow-2xs focus:ring-2 focus:ring-blue-500"
+            />
+
+            <button
+              type="button"
+              disabled={batchActionLoading || !quickAssignTargetUser}
+              onClick={handleQuickAssignToUser}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+              title="Seçilen personele ata ve otomatik bildirim gönder"
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              <span>Seçilene Ata & Bildir</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={batchActionLoading || teamMembers.length === 0}
+              onClick={handleQuickAutoDistribute}
+              className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-2xs transition-all disabled:opacity-50 cursor-pointer"
+              title="Tüm personele eşit paylaştır ve bildirim gönder"
+            >
+              <span>⚖️ Eşit Paylaştır</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* YÖNETİCİ ÇOKLU SEÇİM & PAYLAŞTIRMA / GERİ DÖNDÜRME ÇUBUĞU */}
       {isAdmin && leads.length > 0 && (
         <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
@@ -738,7 +947,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4 min-w-0">
-          {leads.map((lead) => {
+          {leads.slice(0, visibleLimit).map((lead) => {
             const hasPhone = Boolean(lead.phone && lead.phone !== 'Numara Yok');
             const isSelected = selectedLeadIds.includes(lead.id);
 
@@ -987,15 +1196,28 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                     </span>
                   </div>
 
-                  {/* Arama, WhatsApp ve Not/Durum Aksiyonları (6. Adım) */}
+                  {/* Arama, WhatsApp ve Not/Durum Aksiyonları (6. Adım & Bulutfon) */}
                   <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      {/* Tek Tıkla Arama */}
+                    <div className={userBulutfonEnabled ? "grid grid-cols-2 gap-2" : "grid grid-cols-1 gap-2"}>
+                      {/* 3. ADIM: Bulutfon Araması (YALNIZCA Bulutfon yetkisi olan personele) */}
+                      {userBulutfonEnabled && hasPhone ? (
+                        <a
+                          href={getBulutfonDialUrl(lead.phone)}
+                          onClick={(e) => handleBulutfonCallClick(e, lead)}
+                          className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                          title="Bulutfon Plus uygulaması veya VoIP arama ekranında aç"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          <span>Bulutfon Ara</span>
+                        </a>
+                      ) : null}
+
+                      {/* Tek Tıkla Klasik Arama (tel:) */}
                       {hasPhone ? (
                         <a
                           href={lead.call_link}
                           onClick={() => openCallModal(lead)}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all"
                           title="Telefonu Ara ve Karar Notu Ekle"
                         >
                           <PhoneCall className="w-3.5 h-3.5" />
@@ -1004,7 +1226,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                       ) : (
                         <button
                           disabled
-                          className="bg-slate-100 text-slate-400 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1 cursor-not-allowed"
+                          className={`${userBulutfonEnabled ? 'col-span-2' : 'w-full'} bg-slate-100 text-slate-400 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1 cursor-not-allowed`}
                         >
                           Numara Yok
                         </button>
@@ -1016,18 +1238,13 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
                           href={lead.whatsapp_link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all"
+                          className={`${userBulutfonEnabled ? 'col-span-2' : 'w-full'} bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold py-1.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all`}
                           title="WhatsApp Mesajı Başlat"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />
-                          <span>WhatsApp</span>
+                          <span>WhatsApp Mesajı</span>
                         </a>
-                      ) : (
-                        <span className="bg-slate-50 text-slate-400 border border-slate-200 text-xs font-medium py-2 px-3 rounded-xl flex items-center justify-center gap-1">
-                          <MessageSquare className="w-3.5 h-3.5 opacity-40" />
-                          <span>Sabit Hat</span>
-                        </span>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* HER İŞLETME İÇİN KESİNTİSİZ NOT / ÇAĞRI DURUMU BUTONU */}
@@ -1059,6 +1276,19 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
               </div>
             );
           })}
+
+          {/* 1. ADIM: Kademeli Yükleme Butonu (25'erli Gösterim) */}
+          {leads.length > visibleLimit && (
+            <div className="col-span-full pt-4 pb-6 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setVisibleLimit(prev => prev + 25)}
+                className="w-full sm:w-auto px-8 py-3.5 bg-white hover:bg-slate-50 border-2 border-dashed border-indigo-300 hover:border-indigo-500 rounded-2xl font-bold text-sm text-indigo-700 hover:text-indigo-900 transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+              >
+                <span>⬇️ Daha Fazla Göster (Kalan: {leads.length - visibleLimit} İşletme)</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

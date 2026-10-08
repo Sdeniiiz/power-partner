@@ -45,6 +45,12 @@ export default function App() {
     setAuthUser(null);
   };
 
+  const handleUpdateAuthUser = (updatedUser) => {
+    setAuthUser(updatedUser);
+    localStorage.setItem('powerpartner_auth_user', JSON.stringify(updatedUser));
+    refreshGlobalData();
+  };
+
   const handleLoginSuccess = (user) => {
     setAuthUser(user);
     if (user) {
@@ -101,6 +107,7 @@ export default function App() {
         hasApiKey={settings?.has_api_key}
         authUser={authUser}
         onLogout={handleLogout}
+        onUpdateAuthUser={handleUpdateAuthUser}
       />
 
       {/* Ana İçerik Alanı */}

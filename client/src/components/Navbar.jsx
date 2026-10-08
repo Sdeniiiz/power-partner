@@ -13,8 +13,12 @@ import {
   LogOut,
   Shield,
   User,
-  X
+  X,
+  Bell,
+  CheckCheck,
+  Phone
 } from 'lucide-react';
+import { getNotifications, markNotificationsRead, updateUserBulutfon } from '../api';
 
 export default function Navbar({ 
   activeTab, 
@@ -26,20 +30,147 @@ export default function Navbar({
   onOpenSettings,
   hasApiKey,
   authUser,
-  onLogout
+  onLogout,
+  onUpdateAuthUser
 }) {
   const isAdmin = authUser?.role === 'admin';
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef(null);
 
-  // Dışarı tıklandığında profil menüsünü kapat
+  // Bildirim Sistemi (Step 2)
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifMenu, setShowNotifMenu] = useState(false);
+  const notifMenuRef = useRef(null);
+
+  const fetchNotifs = async () => {
+    try {
+      const targetUser = isAdmin ? undefined : (authUser?.name || authUser?.person || authUser?.username);
+      const res = await getNotifications(targetUser);
+      if (res && res.data) {
+        setNotifications(res.data);
+        setUnreadCount(res.unread_count || 0);
+      }
+    } catch (err) {
+      console.error('Bildirimler yüklenemedi:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifs();
+    const interval = setInterval(fetchNotifs, 20000);
+    return () => clearInterval(interval);
+  }, [authUser]);
+
+  const handleMarkAllRead = async () => {
+    try {
+      const targetUser = isAdmin ? undefined : (authUser?.name || authUser?.person || authUser?.username);
+      await markNotificationsRead({ user: targetUser });
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, read: 1 })));
+    } catch (err) {
+      console.error('Bildirimler okundu yapılamadı:', err);
+    }
+  };
+
+  // Kişisel Bulutfon VoIP Ayarları Modalı (Seçenek B)
+  const isBulutfonActive = Boolean(
+    authUser?.bulutfon_enabled === 1 || 
+    authUser?.bulutfon_enabled === true ||
+    (authUser?.bulutfon_ext && authUser?.bulutfon_api_key) ||
+    authUser?.bulutfon_ext
+  );
+
+  const [showBulutfonModal, setShowBulutfonModal] = useState(false);
+  const [bulutfonEnabled, setBulutfonEnabled] = useState(isBulutfonActive);
+  const [bulutfonMode, setBulutfonMode] = useState(authUser?.bulutfon_mode || 'app');
+  const [bulutfonKey, setBulutfonKey] = useState(authUser?.bulutfon_api_key || '');
+  const [bulutfonExt, setBulutfonExt] = useState(authUser?.bulutfon_ext || '');
+  const [savingBulutfon, setSavingBulutfon] = useState(false);
+  const [bulutfonMsg, setBulutfonMsg] = useState('');
+  const [showKeySecret, setShowKeySecret] = useState(false);
+
+  useEffect(() => {
+    if (authUser) {
+      setBulutfonEnabled(Boolean(
+        authUser.bulutfon_enabled === 1 || 
+        authUser.bulutfon_enabled === true || 
+        authUser.bulutfon_ext || 
+        authUser.bulutfon_api_key
+      ));
+      setBulutfonMode(authUser.bulutfon_mode || 'app');
+      setBulutfonKey(authUser.bulutfon_api_key || '');
+      setBulutfonExt(authUser.bulutfon_ext || '');
+    }
+  }, [authUser, showBulutfonModal]);
+
+  const handleSaveBulutfon = async (e) => {
+    if (e) e.preventDefault();
+    if (!authUser?.id) return;
+    setSavingBulutfon(true);
+    try {
+      const res = await updateUserBulutfon(authUser.id, {
+        bulutfon_enabled: bulutfonEnabled ? 1 : 0,
+        bulutfon_mode: bulutfonMode,
+        bulutfon_api_key: bulutfonKey.trim(),
+        bulutfon_ext: bulutfonExt.trim()
+      });
+      if (onUpdateAuthUser && res.user) {
+        onUpdateAuthUser(res.user);
+      }
+      setBulutfonMsg('✓ Bulutfon tercihleriniz başarıyla kaydedildi!');
+      setTimeout(() => {
+        setBulutfonMsg('');
+        setShowBulutfonModal(false);
+      }, 1400);
+    } catch (err) {
+      alert(`Kayıt hatası: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setSavingBulutfon(false);
+    }
+  };
+
+  const handleClearBulutfon = async () => {
+    if (!confirm('Bulutfon entegrasyon ayarlarınızı kapatmak istediğinize emin misiniz?')) return;
+    if (!authUser?.id) return;
+    setSavingBulutfon(true);
+    try {
+      const res = await updateUserBulutfon(authUser.id, {
+        bulutfon_enabled: 0,
+        bulutfon_mode: 'app',
+        bulutfon_api_key: '',
+        bulutfon_ext: ''
+      });
+      setBulutfonEnabled(false);
+      setBulutfonMode('app');
+      setBulutfonKey('');
+      setBulutfonExt('');
+      if (onUpdateAuthUser && res.user) {
+        onUpdateAuthUser(res.user);
+      }
+      setBulutfonMsg('✓ Bulutfon seçeneği kapatıldı.');
+      setTimeout(() => {
+        setBulutfonMsg('');
+        setShowBulutfonModal(false);
+      }, 1400);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setSavingBulutfon(false);
+    }
+  };
+
+  // Dışarı tıklandığında menüleri kapat
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
         setShowProfileMenu(false);
       }
+      if (notifMenuRef.current && !notifMenuRef.current.contains(event.target)) {
+        setShowNotifMenu(false);
+      }
     };
-    if (showProfileMenu) {
+    if (showProfileMenu || showNotifMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('touchstart', handleClickOutside);
     }
@@ -47,7 +178,7 @@ export default function Navbar({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
     };
-  }, [showProfileMenu]);
+  }, [showProfileMenu, showNotifMenu]);
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs w-full max-w-full overflow-visible">
@@ -150,9 +281,93 @@ export default function Navbar({
           </nav>
 
           {/* Sağ Alan: Aktif Kullanıcı & Ayarlar & Çıkış */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0 relative" ref={profileMenuRef}>
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0 relative">
             
+            {/* Bildirim Çanı & Menüsü (Step 2 - 🔔) */}
+            <div className="relative shrink-0" ref={notifMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowNotifMenu(prev => !prev)}
+                className="relative p-1.5 sm:p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all border border-slate-200/80 cursor-pointer shrink-0 flex items-center justify-center"
+                title="Bildirimler"
+              >
+                <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center border-2 border-white animate-pulse">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Bildirim Açılır Çekmecesi (Dropdown) */}
+              {showNotifMenu && (
+                <div className="absolute top-full right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 animate-scale-up overflow-hidden">
+                  <div className="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-xs sm:text-sm text-slate-900">📢 Bildirimler</span>
+                      {unreadCount > 0 && (
+                        <span className="bg-rose-100 text-rose-700 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                          {unreadCount} yeni
+                        </span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleMarkAllRead}
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <CheckCheck className="w-3.5 h-3.5" />
+                        <span>Tümünü Oku</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 scrollbar-thin">
+                    {notifications.length === 0 ? (
+                      <div className="p-8 text-center text-slate-400">
+                        <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                        <p className="text-xs font-semibold">Henüz bildirim bulunmuyor.</p>
+                      </div>
+                    ) : (
+                      notifications.map((notif) => (
+                        <div
+                          key={notif.id}
+                          className={`p-3 text-xs transition-colors flex items-start gap-2.5 ${
+                            notif.read ? 'bg-white opacity-70' : 'bg-blue-50/40 font-medium'
+                          }`}
+                        >
+                          <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                            notif.read ? 'bg-slate-300' : 'bg-blue-600'
+                          }`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-slate-900 truncate">
+                                {notif.title}
+                              </span>
+                              <span className="text-[10px] text-slate-400 shrink-0 font-mono">
+                                {notif.time || ''}
+                              </span>
+                            </div>
+                            <p className="text-slate-600 text-[11px] mt-0.5 leading-relaxed break-words">
+                              {notif.message}
+                            </p>
+                            {notif.date && (
+                              <span className="text-[9px] text-slate-400 mt-1 inline-block">
+                                {notif.date}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Giriş Yapan Hesap Bilgisi / Profil Butonu (Tıklanabilir - Menü Açar) */}
+            <div className="relative shrink-0" ref={profileMenuRef}>
             <button
               type="button"
               onClick={() => setShowProfileMenu(prev => !prev)}
@@ -206,6 +421,30 @@ export default function Navbar({
 
                 {/* Hızlı İşlemler */}
                 <div className="py-2 space-y-1">
+                  {/* Kişisel Bulutfon Ayarları (Seçenek B - Tüm personeller ve Admin için) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      setShowBulutfonModal(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Phone className="w-4 h-4 text-blue-600" />
+                      <span>Bulutfon Ayarlarım</span>
+                    </div>
+                    {isBulutfonActive ? (
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                        {authUser?.bulutfon_mode === 'api' && authUser?.bulutfon_ext ? `Dahili ${authUser.bulutfon_ext}` : 'Aktif'}
+                      </span>
+                    ) : (
+                      <span className="bg-slate-100 text-slate-500 text-[10px] font-medium px-2 py-0.5 rounded-full">
+                        Kapalı
+                      </span>
+                    )}
+                  </button>
+
                   {isAdmin && (
                     <button
                       type="button"
@@ -237,6 +476,7 @@ export default function Navbar({
                 </div>
               </div>
             )}
+            </div>
 
             {/* Ayarlar Butonu (Admin için) */}
             {isAdmin && (
@@ -325,6 +565,196 @@ export default function Navbar({
           </button>
         </div>
       </div>
+
+      {/* Kişisel Bulutfon VoIP Ayarları Modalı (Seçenek B) */}
+      {showBulutfonModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-scale-up">
+            {/* Modal Başlığı */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-white/10 rounded-xl">
+                  <Phone className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base leading-tight">Bulutfon VoIP Ayarlarım</h3>
+                  <p className="text-blue-100 text-xs">Kişisel santral ve dahili yapılandırması</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBulutfonModal(false)}
+                className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBulutfon} className="p-5 space-y-4">
+              {/* Açık / Kapalı Toggle Anahtarı */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800">Bulutfon Kullanımı</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Kartlarda <strong>"📞 Bulutfon Ara"</strong> butonu görünsün mü?
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulutfonEnabled}
+                    onChange={(e) => setBulutfonEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
+              {bulutfonMsg && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-2.5 rounded-xl text-xs font-bold text-center">
+                  {bulutfonMsg}
+                </div>
+              )}
+
+              {bulutfonEnabled ? (
+                <div className="space-y-3.5">
+                  {/* Arama Şekli Seçimi */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Arama Şekli Tercihi:
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBulutfonMode('app')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          bulutfonMode === 'app'
+                            ? 'bg-blue-50/80 border-blue-500 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900">
+                          <span>📱 Doğrudan Uygulama</span>
+                          {bulutfonMode === 'app' && <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded-full">Seçili</span>}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                          <strong>API gerekmez!</strong> Tıkladığınızda telefonunuzdaki Bulutfon Plus arama ekranını açar.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBulutfonMode('api')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          bulutfonMode === 'api'
+                            ? 'bg-blue-50/80 border-blue-500 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900">
+                          <span>🌐 Bulutfon API Santral</span>
+                          {bulutfonMode === 'api' && <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded-full">Seçili</span>}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                          API anahtarı ve dahili ile santral sizi ve müşteriyi otomatik bağlar.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Eğer API Modu Seçildiyse API ve Dahili Alanları */}
+                  {bulutfonMode === 'api' && (
+                    <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 space-y-3">
+                      <div className="space-y-1">
+                        <label className="block text-xs font-bold text-slate-700">
+                          Bulutfon API Anahtarı (Token)
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showKeySecret ? 'text' : 'password'}
+                            value={bulutfonKey}
+                            onChange={(e) => setBulutfonKey(e.target.value)}
+                            placeholder="bf_token_..."
+                            className="w-full text-xs font-mono bg-white border border-slate-300 rounded-xl px-3 py-2 pr-10 outline-hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowKeySecret(prev => !prev)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer text-xs"
+                          >
+                            {showKeySecret ? '🙈' : '👁️'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-xs font-bold text-slate-700">
+                          Dahili Numaranız (Örn: 101, 102)
+                        </label>
+                        <input
+                          type="text"
+                          value={bulutfonExt}
+                          onChange={(e) => setBulutfonExt(e.target.value)}
+                          placeholder="Örn: 101"
+                          className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl px-3 py-2 outline-hidden"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {bulutfonMode === 'app' && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800 flex items-start gap-2">
+                      <span className="text-base shrink-0">✨</span>
+                      <div>
+                        <p className="font-bold">Kurulum gerektirmez!</p>
+                        <p className="text-[11px] text-emerald-700 mt-0.5">
+                          Telefonunuzda "Bulutfon Plus" uygulaması yüklü ise veya bilgisayarınızda bir VoIP programı varsa, arama butonu numarayı doğrudan o uygulamanın arama ekranında açacaktır.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-center text-xs text-slate-500">
+                  Bulutfon arama seçeneği kapalı. Kartlarınızda yalnızca klasik cihaz araması (tel:) ve WhatsApp görünecektir.
+                </div>
+              )}
+
+              {/* Aksiyon Butonları */}
+              <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100">
+                <div>
+                  {isBulutfonActive && (
+                    <button
+                      type="button"
+                      disabled={savingBulutfon}
+                      onClick={handleClearBulutfon}
+                      className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                    >
+                      Kapat & Sıfırla
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBulutfonModal(false)}
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                  >
+                    Vazgeç
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingBulutfon}
+                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {savingBulutfon ? 'Kaydediliyor...' : 'Kaydet'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

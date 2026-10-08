@@ -22,7 +22,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { getJobs, updateJob, getLeads, recordCall } from '../api';
+import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl } from '../api';
 
 export default function MemberDashboard({ currentUser, teamMembers = [], authUser, onJobUpdated }) {
   const [activeMember, setActiveMember] = useState(currentUser || (teamMembers[0] || null));
@@ -37,6 +37,12 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [activeCallTab, setActiveCallTab] = useState('arama_listesi'); // 'arama_listesi' | 'randevu_arama' | 'randevu' | 'iletisimsiz' | 'mutlak_olumsuz' | 'all'
   const [leadStats, setLeadStats] = useState(null);
+
+  // 1. ADIM: Kademeli Yükleme (Pagination - 25'li Gösterim)
+  const [visibleLimit, setVisibleLimit] = useState(25);
+
+  // 3. ADIM: Bulutfon VoIP Arama State
+  const [bulutfonCalling, setBulutfonCalling] = useState(false);
 
   // Çağrı Karar Modalı
   const [activeCallModal, setActiveCallModal] = useState(null);
@@ -105,7 +111,68 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
     } else {
       loadMemberLeads();
     }
+    setVisibleLimit(25);
   }, [activeMember, viewMode, activeCallTab]);
+
+  // 3. ADIM: Bulutfon Arama Tetikleyicisi (Seçenek B: Uygulama & API Desteği)
+  const userBulutfonEnabled = Boolean(
+    authUser?.bulutfon_enabled === 1 || 
+    authUser?.bulutfon_enabled === true || 
+    activeMember?.bulutfon_enabled === 1 || 
+    activeMember?.bulutfon_enabled === true || 
+    currentUser?.bulutfon_enabled === 1 || 
+    currentUser?.bulutfon_enabled === true || 
+    authUser?.bulutfon_ext || 
+    activeMember?.bulutfon_ext || 
+    currentUser?.bulutfon_ext
+  );
+  const userBulutfonMode = authUser?.bulutfon_mode || activeMember?.bulutfon_mode || currentUser?.bulutfon_mode || 'app';
+  const userExt = authUser?.bulutfon_ext || activeMember?.bulutfon_ext || currentUser?.bulutfon_ext;
+  const userApiKey = authUser?.bulutfon_api_key || activeMember?.bulutfon_api_key || currentUser?.bulutfon_api_key;
+
+  const handleBulutfonCallClick = (e, lead) => {
+    // Görüşme notu ve durum modalını hemen aç
+    openCallModal(lead);
+
+    // Eğer kullanıcı API modunu seçmişse ve API bilgileri varsa santral araması yap
+    if (userBulutfonMode === 'api' && userApiKey && userExt) {
+      e.preventDefault();
+      triggerBulutfonApiCall(lead.phone, lead.name);
+    }
+    // Aksi takdirde <a> etiketi doğrudan Bulutfon Plus / VoIP uygulamasını arama ekranıyla açar
+  };
+
+  const triggerBulutfonApiCall = async (phone, bizName) => {
+    if (!phone || phone === 'Numara Yok') {
+      alert('Bu işletmenin telefon numarası bulunamadı.');
+      return;
+    }
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    if (!cleanPhone) {
+      alert('Geçerli telefon numarası formatı bulunamadı.');
+      return;
+    }
+
+    try {
+      setBulutfonCalling(true);
+      const res = await triggerBulutfonCallApi({
+        destination: cleanPhone,
+        apiKey: userApiKey,
+        extension: userExt
+      });
+
+      if (res.success) {
+        alert(`📞 Bulutfon Santrali: Dahiliniz (${res.extension || userExt || 'Santral'}) aranıyor!\n\nAhizeyi/kulaklığı kaldırdığınızda "${bizName}" (${cleanPhone}) müşterisine bağlanacaksınız.`);
+      } else {
+        window.location.href = `tel:${cleanPhone}`;
+      }
+    } catch (err) {
+      console.warn('Bulutfon API çağrılamadı, cihaz aramasına yönlendiriliyor:', err);
+      window.location.href = `tel:${cleanPhone}`;
+    } finally {
+      setBulutfonCalling(false);
+    }
+  };
 
   const handleStatusChange = async (jobId, newStatus) => {
     try {
@@ -529,7 +596,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 min-w-0">
-              {leads.map((lead) => {
+              {leads.slice(0, visibleLimit).map((lead) => {
                 const hasPhone = Boolean(lead.phone && lead.phone !== 'Numara Yok');
                 const isRecallActive = lead.status === 'randevu_arama' || lead.recall_date;
                 const isRecallToday = isRecallActive && lead.recall_date && lead.recall_date <= todayStr;
@@ -663,12 +730,28 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                       </div>
 
                       {/* Arama & WhatsApp Butonları */}
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className={userBulutfonEnabled ? "grid grid-cols-2 gap-2" : "grid grid-cols-1 gap-2"}>
+                        {/* 3. ADIM: Bulutfon Araması (YALNIZCA Bulutfon Açık Olan Personele) */}
+                        {userBulutfonEnabled && hasPhone ? (
+                          <a
+                            href={getBulutfonDialUrl(lead.phone)}
+                            onClick={(e) => handleBulutfonCallClick(e, lead)}
+                            className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                            title="Bulutfon Plus uygulaması veya VoIP santral arama ekranında aç"
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                            <span>Bulutfon Ara</span>
+                          </a>
+                        ) : null}
+
+                        {/* Klasik Cihaz Araması (tel:) */}
                         {hasPhone ? (
                           <a
                             href={lead.call_link || `tel:${lead.phone}`}
                             onClick={() => openCallModal(lead)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                            className={`bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all ${
+                              !userBulutfonEnabled ? 'w-full' : ''
+                            }`}
                             title="Numarayı Ara"
                           >
                             <PhoneCall className="w-3.5 h-3.5" />
@@ -677,7 +760,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                         ) : (
                           <button
                             disabled
-                            className="bg-slate-100 text-slate-400 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1 cursor-not-allowed"
+                            className={`${userBulutfonEnabled ? 'col-span-2' : 'w-full'} bg-slate-100 text-slate-400 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1 cursor-not-allowed`}
                           >
                             Numara Yok
                           </button>
@@ -688,18 +771,13 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                             href={lead.whatsapp_link}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all"
+                            className={`${userBulutfonEnabled ? 'col-span-2' : 'w-full'} bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold py-1.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all`}
                             title="WhatsApp Mesajı Başlat"
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
-                            <span>WhatsApp</span>
+                            <span>WhatsApp Mesajı</span>
                           </a>
-                        ) : (
-                          <span className="bg-slate-50 text-slate-400 border border-slate-200 text-xs font-medium py-2 px-3 rounded-xl flex items-center justify-center gap-1">
-                            <MessageSquare className="w-3.5 h-3.5 opacity-40" />
-                            <span>Sabit Hat</span>
-                          </span>
-                        )}
+                        ) : null}
                       </div>
 
                       {/* Not Ekle / Çağrı Durumu Belirle Butonu */}
@@ -716,6 +794,19 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                   </div>
                 );
               })}
+
+              {/* 1. ADIM: Kademeli Yükleme Butonu (25'erli Gösterim) */}
+              {leads.length > visibleLimit && (
+                <div className="col-span-full pt-4 pb-6 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLimit(prev => prev + 25)}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-white hover:bg-slate-50 border-2 border-dashed border-indigo-300 hover:border-indigo-500 rounded-2xl font-bold text-sm text-indigo-700 hover:text-indigo-900 transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                  >
+                    <span>⬇️ Daha Fazla Göster (Kalan: {leads.length - visibleLimit} İşletme)</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

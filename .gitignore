@@ -6,3 +6,19 @@ client/node_modules/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Presentation generator scratch files
+*.py
+assets_presentation/
+extracted_pdf_pages/
+pdf_preview_pages/
+pdf_preview_slides/
+presentation_assets/
+rendered_pdf_pages/
+scratch_*.png
+test_*.png
+test_*.pdf
+*.docx
+*.pdf
+powerpartner_presentation.html
+

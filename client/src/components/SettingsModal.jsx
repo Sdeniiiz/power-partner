@@ -22,7 +22,8 @@ import {
   Shield,
   RefreshCw,
   Lock,
-  LogOut
+  LogOut,
+  Phone
 } from 'lucide-react';
 import { 
   getSettings, 
@@ -37,6 +38,7 @@ import {
   deleteCampaign,
   getUsers,
   createUser,
+  updateUser,
   updateUserPassword,
   deleteUser,
   deleteTeamMember,
@@ -50,6 +52,8 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [defaultCity, setDefaultCity] = useState('İstanbul');
+  const [bulutfonApiKey, setBulutfonApiKey] = useState('');
+  const [bulutfonMasterNumber, setBulutfonMasterNumber] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -58,6 +62,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
   // Kullanıcı Yönetimi State (Admin)
   const [usersList, setUsersList] = useState([]);
   const [newUsername, setNewUsername] = useState('');
+  const [newUserBulutfonExt, setNewUserBulutfonExt] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserRole, setNewUserRole] = useState('Soğuk Arama');
@@ -187,6 +192,8 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       getSettings().then(res => {
         setApiKey(res.google_maps_api_key || '');
         setDefaultCity(res.default_city || 'İstanbul');
+        setBulutfonApiKey(res.bulutfon_api_key || '');
+        setBulutfonMasterNumber(res.bulutfon_master_number || '');
       }).catch(err => console.error(err));
       loadCampaigns();
       loadUsers();
@@ -206,12 +213,14 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
         password: newPassword.trim(),
         name: newUserName.trim(),
         role: newUserRole,
-        person: newUserName.trim()
+        person: newUserName.trim(),
+        bulutfon_ext: newUserBulutfonExt.trim()
       });
       setUserActionMsg(`✓ ${res.message || 'Kullanıcı oluşturuldu'}`);
       setNewUsername('');
       setNewPassword('');
       setNewUserName('');
+      setNewUserBulutfonExt('');
       loadUsers();
       if (onSettingsUpdated) onSettingsUpdated();
       setTimeout(() => setUserActionMsg(''), 3000);
@@ -453,7 +462,9 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       const trimmed = (apiKey || '').trim();
       await saveSettings({
         google_maps_api_key: trimmed,
-        default_city: defaultCity
+        default_city: defaultCity,
+        bulutfon_api_key: (bulutfonApiKey || '').trim(),
+        bulutfon_master_number: (bulutfonMasterNumber || '').trim()
       });
       setSaveMessage('Ayarlar başarıyla kaydedildi!');
       if (onSettingsUpdated) onSettingsUpdated();
@@ -462,6 +473,20 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       alert(`Kayıt hatası: ${err.message}`);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUpdateUserExt = async (userId, currentExt) => {
+    const newExt = prompt('Personelin Bulutfon Dahili Numarasını girin (Örn: 101, 102):', currentExt || '');
+    if (newExt === null) return;
+    try {
+      await updateUser(userId, { bulutfon_ext: newExt.trim() });
+      setUserActionMsg('✓ Dahili numara güncellendi.');
+      loadUsers();
+      if (onSettingsUpdated) onSettingsUpdated();
+      setTimeout(() => setUserActionMsg(''), 3000);
+    } catch (err) {
+      alert(`Dahili güncelleme hatası: ${err.message}`);
     }
   };
 
@@ -653,9 +678,65 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
               </ol>
             </div>
 
+            {/* 3. KISIM: BULUTFON VOIP SANTRAL ENTEGRASYONU */}
+            <div className="bg-slate-100/80 p-4 rounded-2xl border border-slate-200/90 space-y-3 mt-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Phone className="w-4 h-4 text-blue-600" />
+                  <span>Bulutfon (bulutfon.com) VoIP Santral Ayarları</span>
+                </label>
+                <a
+                  href="https://oim.bulutfon.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-blue-600 font-bold hover:underline flex items-center gap-1"
+                >
+                  <span>Bulutfon OİM</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-normal">
+                Arama butonuna basıldığında Bulutfon REST API üzerinden önce personelin dahilisini (örn: 101) çaldırır, ahize kaldırıldığında müşteriyi bağlar (Call & Bridge).
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    Bulutfon API Anahtarı (apikey):
+                  </label>
+                  <input
+                    type="password"
+                    value={bulutfonApiKey}
+                    onChange={(e) => setBulutfonApiKey(e.target.value)}
+                    placeholder="Bulutfon API Anahtarınız..."
+                    className="w-full text-xs font-mono bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    Varsayılan / Ana Santral Dahili No (Örn: 100, 101):
+                  </label>
+                  <input
+                    type="text"
+                    value={bulutfonMasterNumber}
+                    onChange={(e) => setBulutfonMasterNumber(e.target.value)}
+                    placeholder="Örn: 100 veya 101"
+                    className="w-full text-xs font-mono bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-2.5 text-[11px] text-indigo-900">
+                💡 <strong>İpucu:</strong> Her personele ait özel dahili numarasını (örn: 101, 102) aşağıdaki "Kullanıcı & Personel Yönetimi" tablosundan tanımlayabilirsiniz. Boş bırakılan personellerde buradaki ana dahili kullanılır.
+              </div>
+            </div>
+
             <div className="pt-2 flex items-center justify-between">
               <span className="text-[11px] text-slate-400">
-                {apiKey ? '🟢 Anahtar girilmiş' : '🟡 Anahtar yok (Akıllı Test Modu devrede)'}
+                {apiKey ? '🟢 Google Maps aktif' : '🟡 Google Maps anahtarı girilmedi'}
+                {bulutfonApiKey ? ' • 📞 Bulutfon hazır' : ''}
               </span>
               <button
                 type="submit"
@@ -663,7 +744,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                 className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
               >
                 <Save className="w-3.5 h-3.5" />
-                <span>{saving ? 'Kaydediliyor...' : 'Anahtarı Kaydet'}</span>
+                <span>{saving ? 'Kaydediliyor...' : 'Tüm Ayarları Kaydet'}</span>
               </button>
             </div>
           </div>
@@ -770,6 +851,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                       <th className="py-2.5 px-3">Kullanıcı Adı</th>
                       <th className="py-2.5 px-3">Adı Soyadı</th>
                       <th className="py-2.5 px-3">Departman / Yetki</th>
+                      <th className="py-2.5 px-3">Dahili (Bulutfon)</th>
                       <th className="py-2.5 px-3 text-right">İşlemler</th>
                     </tr>
                   </thead>
@@ -784,6 +866,16 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                             <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] border ${badge.badgeClass}`}>
                               {badge.label}
                             </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateUserExt(u.id, u.bulutfon_ext)}
+                              className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 text-slate-700 hover:text-blue-700 transition-colors flex items-center gap-1 cursor-pointer"
+                              title="Bulutfon Dahili Numarasını Güncelle"
+                            >
+                              <span>{u.bulutfon_ext ? `📞 ${u.bulutfon_ext}` : '+ Dahili Ekle'}</span>
+                            </button>
                           </td>
                           <td className="py-2.5 px-3 text-right">
                             <div className="flex items-center justify-end gap-1">
@@ -825,7 +917,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                 <UserPlus className="w-3.5 h-3.5 text-indigo-600" />
                 <span>Yeni Personel & Giriş Hesabı Oluştur</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2">
                 <input
                   type="text"
                   placeholder="Kullanıcı Adı (Örn: ahmet)"
@@ -846,6 +938,13 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                   value={newUserName}
                   onChange={(e) => setNewUserName(e.target.value)}
                   className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2"
+                />
+                <input
+                  type="text"
+                  placeholder="Dahili No (Örn: 101)"
+                  value={newUserBulutfonExt}
+                  onChange={(e) => setNewUserBulutfonExt(e.target.value)}
+                  className="text-xs bg-white border border-slate-200 rounded-xl px-2.5 py-2 font-mono"
                 />
                 <select
                   value={isAddingCustomRole ? '__custom__' : newUserRole}

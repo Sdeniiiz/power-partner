@@ -47,11 +47,38 @@ export const restoreBackupData = (data) => api.post('/settings/restore', data).t
 export const loginUser = (credentials) => api.post('/team/login', credentials).then(res => res.data);
 export const getUsers = () => api.get('/team/users').then(res => res.data);
 export const createUser = (data) => api.post('/team/users', data).then(res => res.data);
+export const updateUser = (id, data) => api.put(`/team/users/${id}`, data).then(res => res.data);
+export const updateUserBulutfon = (id, data) => api.put(`/team/users/${id}/bulutfon`, data).then(res => res.data);
 export const updateUserPassword = (id, newPassword) => api.put(`/team/users/${id}/password`, { newPassword }).then(res => res.data);
 export const deleteUser = (id) => api.delete(`/team/users/${id}`).then(res => res.data);
+export const updateTeamMember = (id, data) => api.put(`/team/members/${id}`, data).then(res => res.data);
 export const deleteTeamMember = (id) => api.delete(`/team/members/${id}`).then(res => res.data);
 export const getTeamRoles = () => api.get('/team/roles').then(res => res.data);
 export const addCustomRole = (role) => api.post('/team/roles', { role }).then(res => res.data);
+
+// Notifications (Step 2)
+export const getNotifications = (user) => api.get('/notifications', { params: user ? { user } : {} }).then(res => res.data);
+export const markNotificationsRead = (data) => api.post('/notifications/mark-read', data || {}).then(res => res.data);
+export const createNotification = (data) => api.post('/notifications', data).then(res => res.data);
+export const deleteNotification = (id) => api.delete(`/notifications/${id}`).then(res => res.data);
+
+// Bulutfon VoIP (Step 3 & Seçenek B)
+export const triggerBulutfonCallApi = (data) => api.post('/bulutfon/call', data).then(res => res.data);
+export const getBulutfonStatus = () => api.get('/bulutfon/status').then(res => res.data);
+
+// Bulutfon Plus mobil uygulama ve masaüstü VoIP derin bağlantı oluşturucu
+export const getBulutfonDialUrl = (phone) => {
+  if (!phone || phone === 'Numara Yok') return 'tel:';
+  const clean = phone.toString().replace(/[^0-9]/g, '');
+  if (!clean) return 'tel:';
+
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    return `intent:${clean}#Intent;action=android.intent.action.DIAL;scheme=tel;package=com.bulutfon.plus;S.browser_fallback_url=${encodeURIComponent('tel:' + clean)};end`;
+  }
+  // Windows / Mac / iOS için softphone / VoIP protokolü
+  return `callto:${clean}`;
+};
 
 // Admin Temizleme İşlemleri
 export const clearCallQueue = () => api.post('/leads/admin/clear-queue').then(res => res.data);

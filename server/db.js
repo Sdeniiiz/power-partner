@@ -205,6 +205,46 @@ async function initDb() {
       FOREIGN KEY(source_lead_id) REFERENCES leads(id)
     );`);
 
+    await client.execute(`CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        to_user TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        date TEXT,
+        time TEXT,
+        read INTEGER DEFAULT 0,
+        type TEXT DEFAULT 'call_assignment',
+        count INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Bulutfon Dahili Numarası, Bireysel API Anahtarı ve Mod Kolon Göçleri
+    try {
+      await client.execute('ALTER TABLE users ADD COLUMN bulutfon_ext TEXT');
+    } catch (e) {}
+    try {
+      await client.execute('ALTER TABLE users ADD COLUMN bulutfon_api_key TEXT');
+    } catch (e) {}
+    try {
+      await client.execute('ALTER TABLE users ADD COLUMN bulutfon_enabled INTEGER DEFAULT 0');
+    } catch (e) {}
+    try {
+      await client.execute("ALTER TABLE users ADD COLUMN bulutfon_mode TEXT DEFAULT 'app'");
+    } catch (e) {}
+    try {
+      await client.execute('ALTER TABLE team_members ADD COLUMN bulutfon_ext TEXT');
+    } catch (e) {}
+    try {
+      await client.execute('ALTER TABLE team_members ADD COLUMN bulutfon_api_key TEXT');
+    } catch (e) {}
+    try {
+      await client.execute('ALTER TABLE team_members ADD COLUMN bulutfon_enabled INTEGER DEFAULT 0');
+    } catch (e) {}
+    try {
+      await client.execute("ALTER TABLE team_members ADD COLUMN bulutfon_mode TEXT DEFAULT 'app'");
+    } catch (e) {}
+
     // Hızlı sorgular için performans indeksleri
     await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_district ON leads(district);');
@@ -220,6 +260,8 @@ async function initDb() {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_call_logs_caller ON call_logs(caller_name);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_created ON owner_assistant_memory(created_at DESC);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_lead ON owner_assistant_memory(source_lead_id, created_at DESC);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_notifications_to_user ON notifications(to_user);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);');
 
     console.log('✅ Turso veritabanı tabloları ve indeksleri hazır.');
   } catch (err) {

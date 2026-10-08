@@ -124,16 +124,17 @@ router.get('/members', async (req, res) => {
 // Yeni ekip üyesi ekle (users tablosu ile tam senkron)
 router.post('/members', async (req, res) => {
   try {
-    const { name, role, email, phone, color, password, username } = req.body;
+    const { name, role, email, phone, color, password, username, bulutfon_ext } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim gereklidir.' });
 
     const finalRole = role || 'Soğuk Arama';
     const memberColor = color || getRoleColor(finalRole);
+    const cleanExt = (bulutfon_ext || '').trim();
 
     const result = await db.run(`
-      INSERT INTO team_members (name, role, email, phone, color)
-      VALUES (?, ?, ?, ?, ?)
-    `, name.trim(), finalRole, email || '', phone || '', memberColor);
+      INSERT INTO team_members (name, role, email, phone, color, bulutfon_ext)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, name.trim(), finalRole, email || '', phone || '', memberColor, cleanExt || null);
 
     // users tablosuna da ekle (otomatik giriş hesabı)
     const baseUsername = (username || name).trim().toLowerCase().replace(/[^a-z0-9]/g, '') || `user${result.lastInsertRowid}`;
@@ -145,12 +146,47 @@ router.post('/members', async (req, res) => {
 
     const userRole = finalRole === 'Yönetici (Admin)' ? 'admin' : finalRole;
     await db.run(`
-      INSERT INTO users (username, password, name, role, person)
-      VALUES (?, ?, ?, ?, ?)
-    `, finalUsername, password ? password.trim() : '123', name.trim(), userRole, name.trim());
+      INSERT INTO users (username, password, name, role, person, bulutfon_ext)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, finalUsername, password ? password.trim() : '123', name.trim(), userRole, name.trim(), cleanExt || null);
 
     const created = await db.get('SELECT * FROM team_members WHERE id = ?', result.lastInsertRowid);
     res.json({ success: true, data: created });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ekip üyesi / Kullanıcı güncelle (Dahili no vs.)
+router.put('/members/:id', async (req, res) => {
+  try {
+    const memberId = req.params.id;
+    const { name, role, email, phone, color, bulutfon_ext } = req.body;
+
+    const existing = await db.get('SELECT * FROM team_members WHERE id = ?', memberId);
+    if (!existing) return res.status(404).json({ error: 'Personel bulunamadı.' });
+
+    const updatedName = name !== undefined ? name.trim() : existing.name;
+    const updatedRole = role !== undefined ? role : existing.role;
+    const updatedEmail = email !== undefined ? email : existing.email;
+    const updatedPhone = phone !== undefined ? phone : existing.phone;
+    const updatedColor = color !== undefined ? color : existing.color;
+    const updatedExt = bulutfon_ext !== undefined ? bulutfon_ext.trim() : existing.bulutfon_ext;
+
+    await db.run(`
+      UPDATE team_members 
+      SET name = ?, role = ?, email = ?, phone = ?, color = ?, bulutfon_ext = ?
+      WHERE id = ?
+    `, updatedName, updatedRole, updatedEmail, updatedPhone, updatedColor, updatedExt || null, memberId);
+
+    // users tablosunu da güncelle
+    await db.run(`
+      UPDATE users 
+      SET name = ?, person = ?, bulutfon_ext = ?
+      WHERE LOWER(name) = LOWER(?)
+    `, updatedName, updatedName, updatedExt || null, existing.name);
+
+    res.json({ success: true, message: 'Personel bilgileri güncellendi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -229,7 +265,7 @@ router.post('/login', async (req, res) => {
     }
 
     const user = await db.get(`
-      SELECT id, username, name, role, person, password 
+      SELECT id, username, name, role, person, bulutfon_ext, bulutfon_api_key, bulutfon_enabled, bulutfon_mode, password 
       FROM users 
       WHERE LOWER(username) = LOWER(?)
     `, username.trim());
@@ -249,7 +285,7 @@ router.post('/login', async (req, res) => {
 // Tüm kullanıcıları listele (Admin için)
 router.get('/users', async (req, res) => {
   try {
-    const users = await db.all('SELECT id, username, name, role, person, created_at FROM users ORDER BY id ASC');
+    const users = await db.all('SELECT id, username, name, role, person, bulutfon_ext, bulutfon_api_key, bulutfon_enabled, bulutfon_mode, created_at FROM users ORDER BY id ASC');
     res.json({ data: users });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -259,7 +295,7 @@ router.get('/users', async (req, res) => {
 // Yeni kullanıcı oluştur (Admin için)
 router.post('/users', async (req, res) => {
   try {
-    const { username, password, name, role, person } = req.body;
+    const { username, password, name, role, person, bulutfon_ext, bulutfon_api_key } = req.body;
     if (!username || !password || !name) {
       return res.status(400).json({ error: 'Kullanıcı adı, şifre ve isim gereklidir.' });
     }
@@ -273,22 +309,100 @@ router.post('/users', async (req, res) => {
     const finalRole = role || 'Soğuk Arama';
     const displayRole = finalRole === 'admin' ? 'Yönetici (Admin)' : finalRole;
     const color = getRoleColor(finalRole);
+    const cleanExt = (bulutfon_ext || '').trim();
+    const cleanKey = (bulutfon_api_key || '').trim();
 
     const result = await db.run(`
-      INSERT INTO users (username, password, name, role, person)
-      VALUES (?, ?, ?, ?, ?)
-    `, trimmedUser, password.trim(), name.trim(), finalRole, person || name.trim());
+      INSERT INTO users (username, password, name, role, person, bulutfon_ext, bulutfon_api_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, trimmedUser, password.trim(), name.trim(), finalRole, person || name.trim(), cleanExt || null, cleanKey || null);
 
     // Otomatik olarak team_members tablosuna da ekleyelim (eğer yoksa) veya güncelleyelim
     const existingMember = await db.get('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)', name.trim());
     if (!existingMember) {
-      await db.run('INSERT INTO team_members (name, role, color) VALUES (?, ?, ?)', name.trim(), displayRole, color);
+      await db.run('INSERT INTO team_members (name, role, color, bulutfon_ext, bulutfon_api_key) VALUES (?, ?, ?, ?, ?)', name.trim(), displayRole, color, cleanExt || null, cleanKey || null);
     } else {
-      await db.run('UPDATE team_members SET role = ?, color = ? WHERE id = ?', displayRole, color, existingMember.id);
+      await db.run('UPDATE team_members SET role = ?, color = ?, bulutfon_ext = ?, bulutfon_api_key = ? WHERE id = ?', displayRole, color, cleanExt || null, cleanKey || null, existingMember.id);
     }
 
-    const created = await db.get('SELECT id, username, name, role, person FROM users WHERE id = ?', result.lastInsertRowid);
+    const created = await db.get('SELECT id, username, name, role, person, bulutfon_ext, bulutfon_api_key FROM users WHERE id = ?', result.lastInsertRowid);
     res.json({ success: true, data: created, message: 'Personel / kullanıcı başarıyla oluşturuldu.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Kullanıcı Bilgisi Güncelle (Dahili no, isim, rol, bulutfon_api_key)
+router.put('/users/:id', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { name, role, person, bulutfon_ext, bulutfon_api_key } = req.body;
+
+    const user = await db.get('SELECT * FROM users WHERE id = ?', userId);
+    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+
+    const newName = name !== undefined ? name.trim() : user.name;
+    const newRole = role !== undefined ? role : user.role;
+    const newPerson = person !== undefined ? person.trim() : user.person;
+    const newExt = bulutfon_ext !== undefined ? bulutfon_ext.trim() : user.bulutfon_ext;
+    const newKey = bulutfon_api_key !== undefined ? bulutfon_api_key.trim() : user.bulutfon_api_key;
+
+    await db.run(`
+      UPDATE users 
+      SET name = ?, role = ?, person = ?, bulutfon_ext = ?, bulutfon_api_key = ?
+      WHERE id = ?
+    `, newName, newRole, newPerson, newExt || null, newKey || null, userId);
+
+    // team_members tablosunda da varsa güncelle
+    await db.run(`
+      UPDATE team_members 
+      SET name = ?, bulutfon_ext = ?, bulutfon_api_key = ?
+      WHERE LOWER(name) = LOWER(?)
+    `, newName, newExt || null, newKey || null, user.name);
+
+    res.json({ success: true, message: 'Kullanıcı bilgileri güncellendi.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Kullanıcının Kendi Kişisel Bulutfon Ayarlarını Güncellemesi (Seçenek B)
+router.put('/users/:id/bulutfon', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { bulutfon_api_key, bulutfon_ext, bulutfon_enabled, bulutfon_mode } = req.body;
+
+    const user = await db.get('SELECT * FROM users WHERE id = ?', userId);
+    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+
+    const cleanKey = bulutfon_api_key !== undefined ? (bulutfon_api_key || '').trim() : (user.bulutfon_api_key || '');
+    const cleanExt = bulutfon_ext !== undefined ? (bulutfon_ext || '').trim() : (user.bulutfon_ext || '');
+    const enabled = bulutfon_enabled !== undefined ? (bulutfon_enabled ? 1 : 0) : (user.bulutfon_enabled || 0);
+    const mode = bulutfon_mode !== undefined ? (bulutfon_mode || 'app').trim() : (user.bulutfon_mode || 'app');
+
+    await db.run(`
+      UPDATE users 
+      SET bulutfon_api_key = ?, bulutfon_ext = ?, bulutfon_enabled = ?, bulutfon_mode = ?
+      WHERE id = ?
+    `, cleanKey || null, cleanExt || null, enabled, mode, userId);
+
+    // team_members tablosunu da senkron güncelle
+    await db.run(`
+      UPDATE team_members 
+      SET bulutfon_api_key = ?, bulutfon_ext = ?, bulutfon_enabled = ?, bulutfon_mode = ?
+      WHERE LOWER(name) = LOWER(?)
+    `, cleanKey || null, cleanExt || null, enabled, mode, user.name);
+
+    const updatedUser = await db.get(`
+      SELECT id, username, name, role, person, bulutfon_ext, bulutfon_api_key, bulutfon_enabled, bulutfon_mode, created_at 
+      FROM users WHERE id = ?
+    `, userId);
+
+    res.json({ 
+      success: true, 
+      user: updatedUser, 
+      message: 'Bulutfon ayarlarınız başarıyla kaydedildi.' 
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

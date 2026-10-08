@@ -273,9 +273,12 @@ router.post('/distribute', async (req, res) => {
     members.forEach(m => memberMap.set(m.id, m.name));
 
     const stmts = [];
+    const callerCountMap = new Map();
+
     targetLeadIds.forEach((leadId, idx) => {
       const assignedCallerId = cleanCallerIds[idx % cleanCallerIds.length];
       const assignedCallerName = memberMap.get(assignedCallerId) || 'Personel';
+      callerCountMap.set(assignedCallerName, (callerCountMap.get(assignedCallerName) || 0) + 1);
       stmts.push({
         sql: 'UPDATE leads SET assigned_caller_id = ?, assigned_caller_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         args: [assignedCallerId, assignedCallerName, leadId]
@@ -286,13 +289,35 @@ router.post('/distribute', async (req, res) => {
       await db.batch(stmts.slice(i, i + 50), 'write');
     }
 
+    // Bildirim Oluşturma (Step 2 - Otomatik Personel Bildirimleri)
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const timeStr = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    const notifStmts = [];
+    for (const [callerName, assignedCount] of callerCountMap.entries()) {
+      notifStmts.push({
+        sql: `INSERT INTO notifications (to_user, title, message, date, time, read, type, count)
+              VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?)`,
+        args: [
+          callerName,
+          'Yeni Günlük Arama Listesi',
+          `Yönetici bugün size ${assignedCount} yeni arama atadı!`,
+          todayStr,
+          timeStr,
+          assignedCount
+        ]
+      });
+    }
+    if (notifStmts.length > 0) {
+      await db.batch(notifStmts, 'write');
+    }
+
     invalidateCache();
 
     res.json({
       success: true,
       count: targetLeadIds.length,
       callerCount: cleanCallerIds.length,
-      message: `${targetLeadIds.length} işletme seçilen ${cleanCallerIds.length} personele başarıyla paylaştırıldı.`
+      message: `${targetLeadIds.length} işletme seçilen ${cleanCallerIds.length} personele başarıyla paylaştırıldı ve personele bildirim gönderildi.`
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

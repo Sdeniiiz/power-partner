@@ -19,11 +19,16 @@ router.get('/', async (req, res) => {
     rows.forEach(r => { settings[r.key] = r.value; });
 
     const apiKey = settings.google_maps_api_key || process.env.GOOGLE_MAPS_API_KEY || '';
+    const bulutfonKey = settings.bulutfon_api_key || process.env.BULUTFON_API_KEY || '';
+    const bulutfonMaster = settings.bulutfon_master_number || process.env.BULUTFON_MASTER_NUMBER || '';
 
     const result = {
       google_maps_api_key: apiKey,
       has_api_key: Boolean(apiKey && apiKey.trim().length > 10),
-      default_city: settings.default_city || 'İstanbul'
+      default_city: settings.default_city || 'İstanbul',
+      bulutfon_api_key: bulutfonKey,
+      bulutfon_master_number: bulutfonMaster,
+      has_bulutfon: Boolean(bulutfonKey && bulutfonKey.trim().length > 5)
     };
 
     cachedSettings = result;
@@ -38,7 +43,7 @@ router.get('/', async (req, res) => {
 // Ayarları kaydet
 router.post('/', async (req, res) => {
   try {
-    const { google_maps_api_key, default_city } = req.body;
+    const { google_maps_api_key, default_city, bulutfon_api_key, bulutfon_master_number } = req.body;
 
     const upsertSql = `
       INSERT INTO settings (key, value) VALUES (?, ?)
@@ -51,6 +56,12 @@ router.post('/', async (req, res) => {
     }
     if (default_city !== undefined) {
       await db.run(upsertSql, 'default_city', default_city.trim());
+    }
+    if (bulutfon_api_key !== undefined) {
+      await db.run(upsertSql, 'bulutfon_api_key', (bulutfon_api_key || '').trim());
+    }
+    if (bulutfon_master_number !== undefined) {
+      await db.run(upsertSql, 'bulutfon_master_number', (bulutfon_master_number || '').trim());
     }
 
     cachedSettings = null;

@@ -20,6 +20,8 @@ const jobsRoutes = require('./routes/jobs');
 const teamRoutes = require('./routes/team');
 const calendarRoutes = require('./routes/calendar');
 const ownerRoutes = require('./routes/owner');
+const notificationsRoutes = require('./routes/notifications');
+const bulutfonRoutes = require('./routes/bulutfon');
 
 app.use('/api/settings', settingsRoutes);
 app.use('/api/leads', leadsRoutes);
@@ -27,6 +29,8 @@ app.use('/api/jobs', jobsRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/owner', ownerRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/bulutfon', bulutfonRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
