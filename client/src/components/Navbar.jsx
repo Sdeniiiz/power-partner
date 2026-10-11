@@ -31,7 +31,8 @@ export default function Navbar({
   hasApiKey,
   authUser,
   onLogout,
-  onUpdateAuthUser
+  onUpdateAuthUser,
+  onOpenTodayRecalls
 }) {
   const isAdmin = authUser?.role === 'admin';
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -330,36 +331,54 @@ export default function Navbar({
                         <p className="text-xs font-semibold">Henüz bildirim bulunmuyor.</p>
                       </div>
                     ) : (
-                      notifications.map((notif) => (
-                        <div
-                          key={notif.id}
-                          className={`p-3 text-xs transition-colors flex items-start gap-2.5 ${
-                            notif.read ? 'bg-white opacity-70' : 'bg-blue-50/40 font-medium'
-                          }`}
-                        >
-                          <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                            notif.read ? 'bg-slate-300' : 'bg-blue-600'
-                          }`} />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="font-bold text-slate-900 truncate">
-                                {notif.title}
-                              </span>
-                              <span className="text-[10px] text-slate-400 shrink-0 font-mono">
-                                {notif.time || ''}
-                              </span>
+                      notifications.map((notif) => {
+                        const isTodayRecall = notif.type === 'today_recalls' || (notif.title && notif.title.includes('Bugün Aranacak'));
+                        return (
+                          <div
+                            key={notif.id}
+                            onClick={() => {
+                              setShowNotifMenu(false);
+                              if (isTodayRecall && onOpenTodayRecalls) {
+                                onOpenTodayRecalls();
+                              } else {
+                                setActiveTab('calls');
+                              }
+                            }}
+                            className={`p-3 text-xs transition-colors flex items-start gap-2.5 cursor-pointer hover:bg-slate-50 ${
+                              notif.read ? 'bg-white opacity-85' : 'bg-blue-50/50 font-medium'
+                            } ${isTodayRecall ? 'hover:bg-amber-50/60 border-l-4 border-l-amber-500' : ''}`}
+                          >
+                            <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                              isTodayRecall ? 'bg-amber-500 animate-pulse' : (notif.read ? 'bg-slate-300' : 'bg-blue-600')
+                            }`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className={`truncate ${isTodayRecall ? 'font-black text-amber-950' : 'font-bold text-slate-900'}`}>
+                                  {notif.title}
+                                </span>
+                                <span className="text-[10px] text-slate-400 shrink-0 font-mono">
+                                  {notif.time || ''}
+                                </span>
+                              </div>
+                              <p className="text-slate-600 text-[11px] mt-0.5 leading-relaxed break-words">
+                                {notif.message}
+                              </p>
+                              <div className="flex items-center justify-between mt-1">
+                                {notif.date && (
+                                  <span className="text-[9px] text-slate-400 inline-block">
+                                    {notif.date}
+                                  </span>
+                                )}
+                                {isTodayRecall && (
+                                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded-md">
+                                    Listeyi Aç →
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <p className="text-slate-600 text-[11px] mt-0.5 leading-relaxed break-words">
-                              {notif.message}
-                            </p>
-                            {notif.date && (
-                              <span className="text-[9px] text-slate-400 mt-1 inline-block">
-                                {notif.date}
-                              </span>
-                            )}
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>

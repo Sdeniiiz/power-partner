@@ -599,48 +599,22 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </button>
         </div>
 
-        {/* Hızlı Arama Kutusu & Sıralama */}
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 sm:flex-initial">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="İşletme adı veya telefon..."
-              className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 sm:w-56 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
-            />
-            <button
-              type="submit"
-              className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0"
-            >
-              Filtrele
-            </button>
-          </form>
-
-          {/* Hızlı Sıralama Seçici */}
-          <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 rounded-xl px-2.5 py-1.5 shadow-2xs">
-            <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-            <label className="text-xs font-bold text-indigo-950 whitespace-nowrap">Sırala:</label>
-            <select
-              value={sortOption}
-              onChange={(e) => setSortOption(e.target.value)}
-              className="text-xs bg-transparent font-bold text-indigo-900 focus:outline-none cursor-pointer pr-1"
-            >
-              <option value="priority">⚡ Akıllı Öncelik (Randevu & Puan)</option>
-              <option value="date_desc">📅 Kayıt Tarihi (Yeniden Eskiye - En Yeni)</option>
-              <option value="date_asc">📅 Kayıt Tarihi (Eskiden Yeniye - En Eski)</option>
-              <option value="score_desc">⭐ Müşteri İlgi Puanı (5'ten 1'e)</option>
-              <option value="score_asc">⭐ Müşteri İlgi Puanı (1'den 5'e)</option>
-              <option value="last_called_desc">📞 Son Arama Tarihi (En Son Arananlar)</option>
-              <option value="last_called_asc">📞 Son Arama Tarihi (En Eski / Aranmamış)</option>
-              <option value="call_count_desc">🔄 Toplam Arama (En Çok)</option>
-              <option value="call_count_asc">🔄 Toplam Arama (En Az)</option>
-              <option value="rating_desc">★ Google Puanı (En Yüksek)</option>
-              <option value="name_asc">🔤 İşletme Adı (A → Z)</option>
-              <option value="name_desc">🔤 İşletme Adı (Z → A)</option>
-            </select>
-          </div>
-        </div>
+        {/* Hızlı Arama Kutusu */}
+        <form onSubmit={handleSearchSubmit} className="flex gap-2 w-full sm:w-auto">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="İşletme adı veya telefon..."
+            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 sm:w-64 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
+          />
+          <button
+            type="submit"
+            className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0"
+          >
+            Filtrele
+          </button>
+        </form>
       </div>
 
       {/* Gelişmiş Filtreleme Çubuğu (İlçe, Sektör, İletişim & Kalite Kriterleri) */}

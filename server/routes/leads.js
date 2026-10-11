@@ -431,61 +431,61 @@ router.get('/', async (req, res) => {
     }
 
     // Sıralama (Sort By): Tarihe göre artan/azalan, puana göre, son aramaya göre vb.
-    let orderClause = "CASE WHEN status = 'randevu_arama' AND recall_date <= DATE('now', 'localtime') THEN 0 ELSE 1 END";
+    let orderClause = '';
 
     switch (sort) {
       case 'date_desc':
         // Eklenme / Kayıt Tarihi (Yeniden Eskiye - En Yeni)
-        orderClause += ', created_at DESC, id DESC';
+        orderClause = 'created_at DESC, id DESC';
         break;
       case 'date_asc':
         // Eklenme / Kayıt Tarihi (Eskiden Yeniye - En Eski)
-        orderClause += ', created_at ASC, id ASC';
+        orderClause = 'created_at ASC, id ASC';
         break;
       case 'score_desc':
         // Müşteri İlgi Puanı (5 -> 1 - En Yüksek)
-        orderClause += ', score DESC, rating DESC, id DESC';
+        orderClause = 'score DESC, rating DESC, id DESC';
         break;
       case 'score_asc':
         // Müşteri İlgi Puanı (1 -> 5 - En Düşük)
-        orderClause += ', score ASC, id ASC';
+        orderClause = 'score ASC, id ASC';
         break;
       case 'last_called_desc':
         // Son Arama Tarihi (En Son Arananlar)
-        orderClause += ', CASE WHEN last_called_at IS NULL THEN 1 ELSE 0 END, last_called_at DESC, id DESC';
+        orderClause = 'CASE WHEN last_called_at IS NULL THEN 1 ELSE 0 END, last_called_at DESC, id DESC';
         break;
       case 'last_called_asc':
         // Son Arama Tarihi (Hiç Aranmamış veya En Eski Arananlar)
-        orderClause += ', CASE WHEN last_called_at IS NULL THEN 0 ELSE 1 END, last_called_at ASC, id ASC';
+        orderClause = 'CASE WHEN last_called_at IS NULL THEN 0 ELSE 1 END, last_called_at ASC, id ASC';
         break;
       case 'call_count_desc':
         // Arama Sayısı (En Çok Arananlar)
-        orderClause += ', call_count DESC, id DESC';
+        orderClause = 'call_count DESC, id DESC';
         break;
       case 'call_count_asc':
         // Arama Sayısı (En Az / Hiç Aranmayanlar)
-        orderClause += ', call_count ASC, id ASC';
+        orderClause = 'call_count ASC, id ASC';
         break;
       case 'rating_desc':
         // Google Puanı (En Yüksek)
-        orderClause += ', rating DESC, user_ratings_total DESC, id DESC';
+        orderClause = 'rating DESC, user_ratings_total DESC, id DESC';
         break;
       case 'rating_asc':
         // Google Puanı (En Düşük)
-        orderClause += ', rating ASC, id ASC';
+        orderClause = 'rating ASC, id ASC';
         break;
       case 'name_asc':
         // İşletme Adı (A - Z)
-        orderClause += ', name COLLATE NOCASE ASC';
+        orderClause = 'name COLLATE NOCASE ASC';
         break;
       case 'name_desc':
         // İşletme Adı (Z - A)
-        orderClause += ', name COLLATE NOCASE DESC';
+        orderClause = 'name COLLATE NOCASE DESC';
         break;
       case 'priority':
       default:
-        // Varsayılan: Randevular + Puan + ID
-        orderClause += ', score DESC, id DESC';
+        // Akıllı Öncelik: Vadesi gelen Randevular en üstte, ardından Puan ve ID
+        orderClause = "CASE WHEN status = 'randevu_arama' AND recall_date <= DATE('now', 'localtime') THEN 0 ELSE 1 END, score DESC, id DESC";
         break;
     }
 

@@ -7,6 +7,7 @@ import MemberDashboard from './components/MemberDashboard';
 import CalendarView from './components/CalendarView';
 import SettingsModal from './components/SettingsModal';
 import LoginModal from './components/LoginModal';
+import TodayRecallsModal from './components/TodayRecallsModal';
 import { getSettings, getLeads, getTeamMembers, getCategories } from './api';
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isTodayRecallsOpen, setIsTodayRecallsOpen] = useState(false);
 
   const isAdmin = authUser?.role === 'admin';
 
@@ -108,6 +110,7 @@ export default function App() {
         authUser={authUser}
         onLogout={handleLogout}
         onUpdateAuthUser={handleUpdateAuthUser}
+        onOpenTodayRecalls={() => setIsTodayRecallsOpen(true)}
       />
 
       {/* Ana İçerik Alanı */}
@@ -159,6 +162,15 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Bugün Aranacak Randevular & Hatırlatmalar Modalı */}
+      <TodayRecallsModal
+        isOpen={isTodayRecallsOpen}
+        onClose={() => setIsTodayRecallsOpen(false)}
+        authUser={authUser}
+        currentUser={currentUser}
+        onLeadUpdated={refreshGlobalData}
+      />
 
       {/* Sistem Ayarları ve Google Maps API Anahtarı Modalı */}
       <SettingsModal

@@ -21,11 +21,44 @@ router.get('/', async (req, res) => {
       );
     }
 
+    // Bugün aranacak randevuların sayısını dinamik hesapla
+    let recallSql = "SELECT COUNT(*) as count FROM leads WHERE status = 'randevu_arama' AND (recall_date <= DATE('now', 'localtime') OR recall_date IS NULL)";
+    let recallParams = [];
+    if (user) {
+      // Eğer kullanıcı admin değilse ve ismi belirtilmişse hem kendi atananları hem de tüm randevuları kontrol edebilir
+      // Personelin kendisine atanan veya genel randevuları
+      const member = await db.get('SELECT id, name FROM team_members WHERE name = ?', user.trim());
+      if (member) {
+        recallSql += ' AND (assigned_caller_id = ? OR assigned_caller_id IS NULL)';
+        recallParams.push(member.id);
+      }
+    }
+    const recallResult = await db.get(recallSql, ...recallParams);
+    const todayRecallCount = recallResult?.count || 0;
+
+    if (todayRecallCount > 0) {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const dynamicNotif = {
+        id: 'today-recalls-dynamic',
+        to_user: user || 'all',
+        title: '⏰ Bugün Aranacak Randevular Var!',
+        message: `Bugün aranması planlanan ${todayRecallCount} adet işletme bulunuyor. Listeyi görmek ve aramak için tıklayın.`,
+        date: todayStr,
+        time: 'Bugün',
+        read: 0,
+        type: 'today_recalls',
+        count: todayRecallCount
+      };
+      // Bildirim listesinin en başına ekle
+      notifications.unshift(dynamicNotif);
+    }
+
     const unreadCount = notifications.filter(n => n.read === 0).length;
 
     res.json({
       data: notifications,
-      unread_count: unreadCount
+      unread_count: unreadCount,
+      today_recalls_count: todayRecallCount
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
