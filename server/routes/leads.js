@@ -487,16 +487,34 @@ router.post('/:id/call', async (req, res) => {
     else if (outcome === 'ziyaret_olumsuz') newStatus = 'mutlak_olumsuz';
     else if (outcome === 'satis') newStatus = 'satis_havuzu';
 
-    // Personel adını belirle ve notu "Sezai: ..." şeklinde biçimlendir
+    // Personel adını belirle ve notu "Sezai [12.10.2026 14:35]: ..." şeklinde sistem saatinden çekerek biçimlendir
     const author = (caller_name || 'Operatör').trim();
     let formattedNote = '';
     if (notes && notes.trim()) {
-      const cleanNote = notes.trim();
-      if (cleanNote.toLowerCase().startsWith(author.toLowerCase() + ':')) {
-        formattedNote = cleanNote;
-      } else {
-        formattedNote = `${author}: ${cleanNote}`;
+      let cleanNote = notes.trim();
+      // Eğer kullanıcı veya arayüz zaten "Yazar: " veya "Yazar [tarih]: " eklediyse temizle
+      const existingPrefixMatch = cleanNote.match(/^([^\[:]+?)(?:\s*\[[^\]]+\])?\s*:\s*(.*)$/);
+      if (existingPrefixMatch && existingPrefixMatch[1].trim().toLowerCase() === author.toLowerCase()) {
+        cleanNote = existingPrefixMatch[2].trim();
+      } else if (cleanNote.toLowerCase().startsWith(author.toLowerCase() + ':')) {
+        cleanNote = cleanNote.substring(author.length + 1).trim();
       }
+
+      // Türkiye saat diliminde sistem tarihi ve saati
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('tr-TR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: 'Europe/Istanbul'
+      });
+      const timeStr = now.toLocaleTimeString('tr-TR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Istanbul'
+      });
+
+      formattedNote = `${author} [${dateStr} ${timeStr}]: ${cleanNote}`;
     }
 
     // Arama günlüğü ekle

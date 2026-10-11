@@ -84,6 +84,69 @@ export const getBulutfonDialUrl = (phone) => {
 export const clearCallQueue = () => api.post('/leads/admin/clear-queue').then(res => res.data);
 export const clearAllLeads = () => api.post('/leads/admin/clear-all').then(res => res.data);
 
+// Görüşme notu satırını yazar, tarih, saat ve içerik olarak ayrıştırıcı
+export function parseCallNote(line) {
+  if (!line || typeof line !== 'string') return { author: null, date: null, time: null, content: '' };
+
+  const trimmed = line.trim();
+
+  // 1. Standart Format: "Yazar [Tarih Saat]: İçerik" veya "Yazar [Tarih]: İçerik"
+  const bracketMatch = trimmed.match(/^([^\[:]+?)\s*\[(\d{1,2}[\.\/\-]\d{1,2}[\.\/\-]\d{2,4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?\]\s*:\s*(.*)$/);
+  if (bracketMatch) {
+    return {
+      author: bracketMatch[1].trim(),
+      date: bracketMatch[2].trim(),
+      time: bracketMatch[3] ? bracketMatch[3].trim().slice(0, 5) : null,
+      content: bracketMatch[4].trim()
+    };
+  }
+
+  // 2. Köşeli Parantez Başta: "[Tarih Saat] Yazar: İçerik" veya "[Tarih Saat]: İçerik"
+  const bracketFirstMatch = trimmed.match(/^\[(\d{1,2}[\.\/\-]\d{1,2}[\.\/\-]\d{2,4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?\]\s*(?:([^:]+?)\s*:\s*)?(.*)$/);
+  if (bracketFirstMatch) {
+    return {
+      author: bracketFirstMatch[3] ? bracketFirstMatch[3].trim() : null,
+      date: bracketFirstMatch[1].trim(),
+      time: bracketFirstMatch[2] ? bracketFirstMatch[2].trim().slice(0, 5) : null,
+      content: bracketFirstMatch[4].trim()
+    };
+  }
+
+  // 3. Klasik / Eski Format: "Yazar: İçerik"
+  const colonIdx = trimmed.indexOf(':');
+  if (colonIdx > -1 && colonIdx < 35) {
+    const author = trimmed.slice(0, colonIdx).trim();
+    const content = trimmed.slice(colonIdx + 1).trim();
+
+    let date = null;
+    const embeddedDateMatch = content.match(/\b(\d{1,2}[\.\/]\d{1,2}[\.\/]\d{4})\b/);
+    if (embeddedDateMatch) {
+      date = embeddedDateMatch[1];
+    }
+
+    return {
+      author,
+      date,
+      time: null,
+      content
+    };
+  }
+
+  // 4. Düz Satır (Yazarsız)
+  let date = null;
+  const embeddedDateMatch = trimmed.match(/\b(\d{1,2}[\.\/]\d{1,2}[\.\/]\d{4})\b/);
+  if (embeddedDateMatch) {
+    date = embeddedDateMatch[1];
+  }
+
+  return {
+    author: null,
+    date,
+    time: null,
+    content: trimmed
+  };
+}
+
 export default api;
 
 

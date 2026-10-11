@@ -15,9 +15,10 @@ import {
   Building2,
   Trash2
 } from 'lucide-react';
-import { getLeads, getJobs, createJob, updateJob, deleteJob, getCategories, getTeamMembers } from '../api';
+import { getLeads, getJobs, createJob, updateJob, deleteJob, getCategories, getTeamMembers, parseCallNote } from '../api';
 
-export default function SalesPool({ currentUser, onJobCreated }) {
+export default function SalesPool({ currentUser, authUser, onJobCreated }) {
+  const isAdmin = authUser?.role === 'admin';
   const [salesLeads, setSalesLeads] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -227,9 +228,33 @@ export default function SalesPool({ currentUser, onJobCreated }) {
                     {lead.district} • {lead.phone}
                   </p>
                   {lead.call_notes && (
-                    <p className="text-xs text-slate-700 bg-white p-2 rounded-lg mt-2 border border-purple-100 italic">
-                      "{lead.call_notes}"
-                    </p>
+                    <div className="mt-2 space-y-1.5 max-h-28 overflow-y-auto pr-1 scrollbar-thin">
+                      {lead.call_notes.split('\n').filter(Boolean).map((noteLine, idx) => {
+                        const parsed = parseCallNote(noteLine);
+                        return (
+                          <div key={idx} className="text-xs bg-white p-2 rounded-lg border border-purple-100 flex flex-col gap-0.5">
+                            <div className="flex items-center justify-between gap-1 flex-wrap">
+                              <span className="font-bold text-purple-800 text-[11px]">
+                                {parsed.author || 'Operatör'}
+                              </span>
+                              {(parsed.date || (isAdmin && parsed.time)) && (
+                                <div className="text-[10px] text-slate-500 flex items-center gap-1 bg-purple-50/60 px-1.5 py-0.5 rounded border border-purple-100">
+                                  {parsed.date && <span>📅 {parsed.date}</span>}
+                                  {isAdmin && parsed.time && (
+                                    <span className="text-purple-700 font-semibold ml-0.5 pl-1 border-l border-purple-200" title="Sadece Yöneticiler Görebilir">
+                                      ⏰ {parsed.time}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-slate-700 italic text-[11px]">
+                              "{parsed.content}"
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
 

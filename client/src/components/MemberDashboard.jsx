@@ -22,9 +22,10 @@ import {
   Sparkles
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl } from '../api';
+import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote } from '../api';
 
 export default function MemberDashboard({ currentUser, teamMembers = [], authUser, onJobUpdated }) {
+  const isAdmin = authUser?.role === 'admin';
   const [activeMember, setActiveMember] = useState(currentUser || (teamMembers[0] || null));
   const [viewMode, setViewMode] = useState('calls'); // 'calls' | 'jobs'
   
@@ -684,21 +685,34 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                           </span>
                           <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
                             {lead.call_notes.split('\n').filter(Boolean).map((noteLine, idx) => {
-                              const colonIdx = noteLine.indexOf(':');
-                              const hasAuthor = colonIdx > -1 && colonIdx < 35;
-                              const author = hasAuthor ? noteLine.slice(0, colonIdx).trim() : null;
-                              const noteContent = hasAuthor ? noteLine.slice(colonIdx + 1).trim() : noteLine;
+                              const parsed = parseCallNote(noteLine);
 
                               return (
-                                <div key={idx} className="bg-slate-50 border border-slate-200/90 rounded-xl p-2 text-xs flex flex-col gap-0.5">
-                                  {author && (
+                                <div key={idx} className="bg-slate-50 border border-slate-200/90 rounded-xl p-2 text-xs flex flex-col gap-1">
+                                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
                                     <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-700">
                                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0"></span>
-                                      <span>{author}</span>
+                                      <span>{parsed.author || 'Personel'}</span>
                                     </div>
-                                  )}
+                                    {(parsed.date || (isAdmin && parsed.time)) && (
+                                      <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium bg-white px-2 py-0.5 rounded-md border border-slate-200/80 shadow-2xs">
+                                        {parsed.date && (
+                                          <span className="flex items-center gap-1">
+                                            <span>📅</span>
+                                            <span>{parsed.date}</span>
+                                          </span>
+                                        )}
+                                        {isAdmin && parsed.time && (
+                                          <span className="flex items-center gap-0.5 text-indigo-600 font-semibold ml-1 pl-1 border-l border-slate-200" title="Sadece Yöneticiler Görebilir">
+                                            <span>⏰</span>
+                                            <span>{parsed.time}</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                   <p className="text-slate-700 font-medium text-[11px] leading-relaxed italic pl-3">
-                                    "{noteContent}"
+                                    "{parsed.content}"
                                   </p>
                                 </div>
                               );
@@ -1028,16 +1042,33 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                 </label>
                 <div className="max-h-32 overflow-y-auto space-y-1.5 bg-slate-50 border border-slate-200 rounded-xl p-2.5 scrollbar-thin">
                   {activeCallModal.call_notes.split('\n').filter(Boolean).map((line, i) => {
-                    const colonIdx = line.indexOf(':');
-                    const hasAuthor = colonIdx > -1 && colonIdx < 35;
-                    const author = hasAuthor ? line.slice(0, colonIdx).trim() : null;
-                    const content = hasAuthor ? line.slice(colonIdx + 1).trim() : line;
+                    const parsed = parseCallNote(line);
                     return (
-                      <div key={i} className="text-xs bg-white border border-slate-200/90 rounded-lg p-2 text-slate-700 shadow-2xs">
-                        {author && (
-                          <span className="font-bold text-indigo-700 mr-1.5">[{author}]:</span>
-                        )}
-                        <span className="italic">{content}</span>
+                      <div key={i} className="text-xs bg-white border border-slate-200/90 rounded-lg p-2 text-slate-700 shadow-2xs space-y-1">
+                        <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                          <span className="font-bold text-indigo-700 text-[11px]">
+                            [{parsed.author || 'Personel'}]:
+                          </span>
+                          {(parsed.date || (isAdmin && parsed.time)) && (
+                            <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                              {parsed.date && (
+                                <span className="flex items-center gap-1">
+                                  <span>📅</span>
+                                  <span>{parsed.date}</span>
+                                </span>
+                              )}
+                              {isAdmin && parsed.time && (
+                                <span className="flex items-center gap-0.5 text-indigo-600 font-semibold ml-1 pl-1 border-l border-slate-200" title="Sadece Yöneticiler Görebilir">
+                                  <span>⏰</span>
+                                  <span>{parsed.time}</span>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="italic text-slate-700 text-[11px] pl-1">
+                          "{parsed.content}"
+                        </div>
                       </div>
                     );
                   })}

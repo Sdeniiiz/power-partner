@@ -138,6 +138,7 @@ export default function App() {
         {activeTab === 'sales' && (
           <SalesPool
             currentUser={currentUser}
+            authUser={authUser}
             onJobCreated={refreshGlobalData}
           />
         )}
