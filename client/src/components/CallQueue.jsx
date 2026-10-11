@@ -599,22 +599,48 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </button>
         </div>
 
-        {/* Hızlı Arama Kutusu */}
-        <form onSubmit={handleSearchSubmit} className="flex gap-2 w-full sm:w-auto">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="İşletme adı veya telefon..."
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 sm:w-64 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
-          />
-          <button
-            type="submit"
-            className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0"
-          >
-            Filtrele
-          </button>
-        </form>
+        {/* Hızlı Arama Kutusu & Sıralama */}
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+          <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 sm:flex-initial">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="İşletme adı veya telefon..."
+              className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex-1 sm:w-56 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
+            />
+            <button
+              type="submit"
+              className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0"
+            >
+              Filtrele
+            </button>
+          </form>
+
+          {/* Hızlı Sıralama Seçici */}
+          <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 rounded-xl px-2.5 py-1.5 shadow-2xs">
+            <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <label className="text-xs font-bold text-indigo-950 whitespace-nowrap">Sırala:</label>
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value)}
+              className="text-xs bg-transparent font-bold text-indigo-900 focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="priority">⚡ Akıllı Öncelik (Randevu & Puan)</option>
+              <option value="date_desc">📅 Kayıt Tarihi (Yeniden Eskiye - En Yeni)</option>
+              <option value="date_asc">📅 Kayıt Tarihi (Eskiden Yeniye - En Eski)</option>
+              <option value="score_desc">⭐ Müşteri İlgi Puanı (5'ten 1'e)</option>
+              <option value="score_asc">⭐ Müşteri İlgi Puanı (1'den 5'e)</option>
+              <option value="last_called_desc">📞 Son Arama Tarihi (En Son Arananlar)</option>
+              <option value="last_called_asc">📞 Son Arama Tarihi (En Eski / Aranmamış)</option>
+              <option value="call_count_desc">🔄 Toplam Arama (En Çok)</option>
+              <option value="call_count_asc">🔄 Toplam Arama (En Az)</option>
+              <option value="rating_desc">★ Google Puanı (En Yüksek)</option>
+              <option value="name_asc">🔤 İşletme Adı (A → Z)</option>
+              <option value="name_desc">🔤 İşletme Adı (Z → A)</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Gelişmiş Filtreleme Çubuğu (İlçe, Sektör, İletişim & Kalite Kriterleri) */}
@@ -666,7 +692,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-2.5 min-w-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2 sm:gap-2.5 min-w-0">
           {/* İlçe Filtresi */}
           <div className="min-w-0">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -801,6 +827,32 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
               <option value="4.5">★ 4.5 ve Üzeri</option>
               <option value="4.0">★ 4.0 ve Üzeri</option>
               <option value="3.5">★ 3.5 ve Üzeri</option>
+            </select>
+          </div>
+
+          {/* Sıralama Ölçütü */}
+          <div className="min-w-0">
+            <label className="block text-[11px] font-bold text-indigo-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <ArrowUpDown className="w-3 h-3 text-indigo-600" />
+              <span>Sıralama</span>
+            </label>
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value)}
+              className="w-full min-w-0 max-w-full text-xs bg-indigo-50/70 border border-indigo-200 rounded-xl px-2.5 py-2 font-bold text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 cursor-pointer truncate"
+            >
+              <option value="priority">⚡ Akıllı Öncelik</option>
+              <option value="date_desc">📅 Kayıt Tarihi (En Yeni)</option>
+              <option value="date_asc">📅 Kayıt Tarihi (En Eski)</option>
+              <option value="score_desc">⭐ Müşteri Puanı (5 → 1)</option>
+              <option value="score_asc">⭐ Müşteri Puanı (1 → 5)</option>
+              <option value="last_called_desc">📞 Son Arama (En Yeni)</option>
+              <option value="last_called_asc">📞 Son Arama (En Eski)</option>
+              <option value="call_count_desc">🔄 Arama Sayısı (En Çok)</option>
+              <option value="call_count_asc">🔄 Arama Sayısı (En Az)</option>
+              <option value="rating_desc">★ Google Puanı</option>
+              <option value="name_asc">🔤 İsim (A → Z)</option>
+              <option value="name_desc">🔤 İsim (Z → A)</option>
             </select>
           </div>
         </div>
