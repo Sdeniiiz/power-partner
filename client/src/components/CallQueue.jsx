@@ -29,7 +29,8 @@ import {
   Users,
   UserCheck,
   Bell,
-  Building2
+  Building2,
+  ArrowUpDown
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
 import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote } from '../api';
@@ -48,6 +49,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
   const [ratingFilter, setRatingFilter] = useState('');
   const [metaFilters, setMetaFilters] = useState({ districts: [], categories: [], callers: [] });
   const [calledByFilter, setCalledByFilter] = useState('');
+  const [sortOption, setSortOption] = useState('priority'); // 'priority' | 'date_desc' | 'date_asc' | 'score_desc' | 'score_asc' | 'last_called_desc' | 'last_called_asc' | 'call_count_desc' | 'call_count_asc' | 'rating_desc' | 'name_asc' | 'name_desc'
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,6 +116,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         min_rating: ratingFilter || undefined,
         assigned_caller_id: assignedCallerFilter !== '' ? assignedCallerFilter : undefined,
         called_by: calledByFilter !== '' ? calledByFilter : undefined,
+        sort: sortOption,
         limit: 2000
       });
       setLeads(res.data || []);
@@ -130,12 +133,12 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter]);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, sortOption]);
 
   // Filtreler veya arama değiştiğinde 25'li kademeli yüklemeyi sıfırla
   useEffect(() => {
     setVisibleLimit(25);
-  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, searchQuery]);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, searchQuery, sortOption]);
 
   // 2. ADIM: Hızlı Dağıtım Fonksiyonları
   const handleQuickAssignToUser = async () => {
@@ -289,6 +292,7 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
     setAssignedCallerFilter('');
     setCalledByFilter('');
     setSearchQuery('');
+    setSortOption('priority');
     loadLeads('');
   };
 
@@ -625,15 +629,41 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
               </span>
             )}
           </div>
-          {activeFiltersCount > 0 && (
-            <button
-              onClick={handleResetFilters}
-              className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer shrink-0"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Filtreleri Sıfırla</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Sıralama Seçici (Tarih, Puan, Arama vb.) */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs hover:border-indigo-300 transition-colors">
+              <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <label className="text-[11px] font-bold text-slate-600 whitespace-nowrap">Sırala:</label>
+              <select
+                value={sortOption}
+                onChange={(e) => setSortOption(e.target.value)}
+                className="text-xs bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
+              >
+                <option value="priority">⚡ Akıllı Öncelik (Randevu & Puan)</option>
+                <option value="date_desc">📅 Kayıt Tarihi (Yeniden Eskiye - En Yeni)</option>
+                <option value="date_asc">📅 Kayıt Tarihi (Eskiden Yeniye - En Eski)</option>
+                <option value="score_desc">⭐ Müşteri İlgi Puanı (5'ten 1'e - En Yüksek)</option>
+                <option value="score_asc">⭐ Müşteri İlgi Puanı (1'den 5'e - En Düşük)</option>
+                <option value="last_called_desc">📞 Son Arama Tarihi (En Son Arananlar)</option>
+                <option value="last_called_asc">📞 Son Arama Tarihi (En Eski / Aranmamış)</option>
+                <option value="call_count_desc">🔄 Toplam Arama (En Çok Aranan)</option>
+                <option value="call_count_asc">🔄 Toplam Arama (En Az / Hiç)</option>
+                <option value="rating_desc">★ Google Puanı (En Yüksek)</option>
+                <option value="name_asc">🔤 İşletme Adı (A → Z)</option>
+                <option value="name_desc">🔤 İşletme Adı (Z → A)</option>
+              </select>
+            </div>
+
+            {activeFiltersCount > 0 && (
+              <button
+                onClick={handleResetFilters}
+                className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 hover:underline cursor-pointer shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Filtreleri Sıfırla</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-2.5 min-w-0">

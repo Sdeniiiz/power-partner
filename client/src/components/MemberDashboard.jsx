@@ -19,7 +19,8 @@ import {
   CheckCircle,
   XCircle,
   PhoneOff,
-  Sparkles
+  Sparkles,
+  ArrowUpDown
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
 import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote } from '../api';
@@ -28,6 +29,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
   const isAdmin = authUser?.role === 'admin';
   const [activeMember, setActiveMember] = useState(currentUser || (teamMembers[0] || null));
   const [viewMode, setViewMode] = useState('calls'); // 'calls' | 'jobs'
+  const [sortOption, setSortOption] = useState('priority');
   
   // İşler (Jobs) State
   const [jobs, setJobs] = useState([]);
@@ -93,6 +95,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
       const res = await getLeads({
         assigned_caller_id: activeMember.id,
         status: activeCallTab === 'all' ? undefined : activeCallTab,
+        sort: sortOption,
         limit: 300
       });
       setLeads(res.data || []);
@@ -113,7 +116,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
       loadMemberLeads();
     }
     setVisibleLimit(25);
-  }, [activeMember, viewMode, activeCallTab]);
+  }, [activeMember, viewMode, activeCallTab, sortOption]);
 
   // 3. ADIM: Bulutfon Arama Tetikleyicisi (Seçenek B: Uygulama & API Desteği)
   const userBulutfonEnabled = Boolean(
@@ -438,14 +441,39 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
           
           {/* 6 ADET ALT BÖLÜM SEKMESİ */}
           <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs">
-            <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 flex-wrap gap-2">
               <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                 <PhoneCall className="w-3.5 h-3.5 text-blue-600" />
                 Arama Kuyruğu Bölümleri (6 Kategori):
               </span>
-              <span className="text-xs text-slate-400 font-bold">
-                {activeMember?.name} Arama Masası
-              </span>
+              
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1 shadow-2xs">
+                  <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <label className="text-[11px] font-bold text-slate-600 whitespace-nowrap">Sırala:</label>
+                  <select
+                    value={sortOption}
+                    onChange={(e) => setSortOption(e.target.value)}
+                    className="text-xs bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
+                  >
+                    <option value="priority">⚡ Akıllı Öncelik (Randevu & Puan)</option>
+                    <option value="date_desc">📅 Kayıt Tarihi (Yeniden Eskiye - En Yeni)</option>
+                    <option value="date_asc">📅 Kayıt Tarihi (Eskiden Yeniye - En Eski)</option>
+                    <option value="score_desc">⭐ Müşteri İlgi Puanı (5'ten 1'e)</option>
+                    <option value="score_asc">⭐ Müşteri İlgi Puanı (1'den 5'e)</option>
+                    <option value="last_called_desc">📞 Son Arama (En Son Arananlar)</option>
+                    <option value="last_called_asc">📞 Son Arama (En Eski / Aranmamış)</option>
+                    <option value="call_count_desc">🔄 Arama Sayısı (En Çok)</option>
+                    <option value="call_count_asc">🔄 Arama Sayısı (En Az)</option>
+                    <option value="rating_desc">★ Google Puanı (En Yüksek)</option>
+                    <option value="name_asc">🔤 İsim (A → Z)</option>
+                    <option value="name_desc">🔤 İsim (Z → A)</option>
+                  </select>
+                </div>
+                <span className="text-xs text-slate-400 font-bold hidden sm:inline">
+                  • {activeMember?.name} Masası
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-1.5 sm:gap-2">
