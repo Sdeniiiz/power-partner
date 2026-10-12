@@ -47,7 +47,7 @@ export default function Navbar({
   const fetchNotifs = async () => {
     try {
       const targetUser = isAdmin ? undefined : (authUser?.name || authUser?.person || authUser?.username);
-      const res = await getNotifications(targetUser);
+      const res = await getNotifications(targetUser, isAdmin);
       if (res && res.data) {
         setNotifications(res.data);
         setUnreadCount(res.unread_count || 0);

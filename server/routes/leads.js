@@ -198,6 +198,46 @@ router.post('/import', async (req, res) => {
       await db.batch(stmts.slice(i, i + 50), 'write');
     }
 
+    // Personele doğrudan atandıysa bildirim oluştur (İşletme Adları Dahil)
+    if (callerList.length > 0) {
+      try {
+        const callerImportsMap = new Map();
+        places.forEach((item, idx) => {
+          const cId = callerList[idx % callerList.length];
+          const cName = callerMap.get(cId) || 'Personel';
+          if (!callerImportsMap.has(cName)) callerImportsMap.set(cName, []);
+          callerImportsMap.get(cName).push(item.name || 'İşletme');
+        });
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const timeStr = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+        for (const [cName, names] of callerImportsMap.entries()) {
+          const count = names.length;
+          let title = '📞 Yeni Arama Atandı';
+          let message = '';
+          if (count === 1) {
+            title = `📞 Yeni Arama: ${names[0]}`;
+            message = `Yönetici size "${names[0]}" işletmesini arama listesine atadı.`;
+          } else if (count === 2) {
+            title = `📞 2 Yeni Arama Atandı`;
+            message = `Yönetici size "${names[0]}" ve "${names[1]}" işletmelerini atadı.`;
+          } else {
+            title = `📞 ${count} Yeni Arama Atandı`;
+            message = `Yönetici size "${names[0]}", "${names[1]}" ve ${count - 2} diğer işletmeyi atadı.`;
+          }
+
+          await db.run(
+            `INSERT INTO notifications (to_user, title, message, date, time, read, type, count)
+             VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?)`,
+            cName, title, message, todayStr, timeStr, count
+          );
+        }
+      } catch (importNotifErr) {
+        console.error('Import bildirim hatası:', importNotifErr);
+      }
+    }
+
     invalidateCache();
 
     let feedbackMsg = `${stmts.length} işletme arama listesine kaydedildi.`;
@@ -272,13 +312,28 @@ router.post('/distribute', async (req, res) => {
     const memberMap = new Map();
     members.forEach(m => memberMap.set(m.id, m.name));
 
+    // Hedef işletmelerin isim ve konum bilgilerini çek (Bildirimlerde işletme adlarını göstermek için)
+    const targetLeadPlaceholders = targetLeadIds.map(() => '?').join(',');
+    const leadRows = await db.all(
+      `SELECT id, name, district, category FROM leads WHERE id IN (${targetLeadPlaceholders})`,
+      ...targetLeadIds
+    );
+    const leadMap = new Map();
+    leadRows.forEach(l => leadMap.set(l.id, l));
+
     const stmts = [];
-    const callerCountMap = new Map();
+    const callerLeadsMap = new Map();
 
     targetLeadIds.forEach((leadId, idx) => {
       const assignedCallerId = cleanCallerIds[idx % cleanCallerIds.length];
       const assignedCallerName = memberMap.get(assignedCallerId) || 'Personel';
-      callerCountMap.set(assignedCallerName, (callerCountMap.get(assignedCallerName) || 0) + 1);
+      
+      const leadInfo = leadMap.get(leadId) || { id: leadId, name: 'İşletme', district: '' };
+      if (!callerLeadsMap.has(assignedCallerName)) {
+        callerLeadsMap.set(assignedCallerName, []);
+      }
+      callerLeadsMap.get(assignedCallerName).push(leadInfo);
+
       stmts.push({
         sql: 'UPDATE leads SET assigned_caller_id = ?, assigned_caller_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         args: [assignedCallerId, assignedCallerName, leadId]
@@ -289,24 +344,46 @@ router.post('/distribute', async (req, res) => {
       await db.batch(stmts.slice(i, i + 50), 'write');
     }
 
-    // Bildirim Oluşturma (Step 2 - Otomatik Personel Bildirimleri)
+    // Bildirim Oluşturma (İşletme Adları Açık ve Doğru Gösterilir)
     const todayStr = new Date().toISOString().slice(0, 10);
     const timeStr = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
     const notifStmts = [];
-    for (const [callerName, assignedCount] of callerCountMap.entries()) {
+
+    for (const [callerName, assignedLeads] of callerLeadsMap.entries()) {
+      const count = assignedLeads.length;
+      let title = '📞 Yeni Arama Atandı';
+      let message = '';
+
+      if (count === 1) {
+        const l = assignedLeads[0];
+        const distText = l.district ? ` (${l.district})` : '';
+        title = `📞 Yeni Arama: ${l.name}`;
+        message = `Yönetici size "${l.name}"${distText} işletmesini arama listesine atadı.`;
+      } else if (count === 2) {
+        title = `📞 2 Yeni Arama Atandı`;
+        message = `Yönetici size "${assignedLeads[0].name}" ve "${assignedLeads[1].name}" işletmelerini atadı.`;
+      } else if (count === 3) {
+        title = `📞 3 Yeni Arama Atandı`;
+        message = `Yönetici size "${assignedLeads[0].name}", "${assignedLeads[1].name}" ve "${assignedLeads[2].name}" işletmelerini atadı.`;
+      } else {
+        title = `📞 ${count} Yeni Arama Atandı`;
+        message = `Yönetici size "${assignedLeads[0].name}", "${assignedLeads[1].name}" ve ${count - 2} diğer işletmeyi atadı.`;
+      }
+
       notifStmts.push({
         sql: `INSERT INTO notifications (to_user, title, message, date, time, read, type, count)
               VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?)`,
         args: [
           callerName,
-          'Yeni Günlük Arama Listesi',
-          `Yönetici bugün size ${assignedCount} yeni arama atadı!`,
+          title,
+          message,
           todayStr,
           timeStr,
-          assignedCount
+          count
         ]
       });
     }
+
     if (notifStmts.length > 0) {
       await db.batch(notifStmts, 'write');
     }
@@ -653,6 +730,53 @@ router.put('/batch/assign', async (req, res) => {
 
     for (let i = 0; i < stmts.length; i += 50) {
       await db.batch(stmts.slice(i, i + 50), 'write');
+    }
+
+    // Personele Atandıysa Bildirim Gönder (İşletme Adları Dahil)
+    if (callerName && cleanCallerId) {
+      try {
+        const leadPlaceholders = lead_ids.map(() => '?').join(',');
+        const assignedLeads = await db.all(
+          `SELECT id, name, district FROM leads WHERE id IN (${leadPlaceholders})`,
+          ...lead_ids
+        );
+
+        const count = assignedLeads.length;
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const timeStr = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+        let title = '📞 Yeni Arama Atandı';
+        let message = '';
+
+        if (count === 1) {
+          const l = assignedLeads[0];
+          const distText = l.district ? ` (${l.district})` : '';
+          title = `📞 Yeni Arama: ${l.name}`;
+          message = `Yönetici size "${l.name}"${distText} işletmesini arama listesine atadı.`;
+        } else if (count === 2) {
+          title = `📞 2 Yeni Arama Atandı`;
+          message = `Yönetici size "${assignedLeads[0].name}" ve "${assignedLeads[1].name}" işletmelerini atadı.`;
+        } else if (count === 3) {
+          title = `📞 3 Yeni Arama Atandı`;
+          message = `Yönetici size "${assignedLeads[0].name}", "${assignedLeads[1].name}" ve "${assignedLeads[2].name}" işletmelerini atadı.`;
+        } else {
+          title = `📞 ${count} Yeni Arama Atandı`;
+          message = `Yönetici size "${assignedLeads[0].name}", "${assignedLeads[1].name}" ve ${count - 2} diğer işletmeyi atadı.`;
+        }
+
+        await db.run(
+          `INSERT INTO notifications (to_user, title, message, date, time, read, type, count)
+           VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?)`,
+          callerName,
+          title,
+          message,
+          todayStr,
+          timeStr,
+          count
+        );
+      } catch (notifErr) {
+        console.error('Batch assign bildirim oluşturma hatası:', notifErr);
+      }
     }
 
     invalidateCache();
