@@ -8,6 +8,7 @@ import CalendarView from './components/CalendarView';
 import SettingsModal from './components/SettingsModal';
 import LoginModal from './components/LoginModal';
 import TodayRecallsModal from './components/TodayRecallsModal';
+import AssignedLeadsModal from './components/AssignedLeadsModal';
 import { getSettings, getLeads, getTeamMembers, getCategories } from './api';
 
 export default function App() {
@@ -28,6 +29,8 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTodayRecallsOpen, setIsTodayRecallsOpen] = useState(false);
+  const [assignedLeadsNotif, setAssignedLeadsNotif] = useState(null);
+  const [filterNotificationLeadIds, setFilterNotificationLeadIds] = useState(null);
 
   const isAdmin = authUser?.role === 'admin';
 
@@ -111,6 +114,7 @@ export default function App() {
         onLogout={handleLogout}
         onUpdateAuthUser={handleUpdateAuthUser}
         onOpenTodayRecalls={() => setIsTodayRecallsOpen(true)}
+        onOpenAssignedLeads={(notif) => setAssignedLeadsNotif(notif)}
       />
 
       {/* Ana İçerik Alanı */}
@@ -134,6 +138,8 @@ export default function App() {
             currentUser={currentUser}
             authUser={authUser}
             onLeadUpdated={refreshGlobalData}
+            filterNotificationLeadIds={filterNotificationLeadIds}
+            onClearNotificationFilter={() => setFilterNotificationLeadIds(null)}
           />
         )}
 
@@ -170,6 +176,20 @@ export default function App() {
         authUser={authUser}
         currentUser={currentUser}
         onLeadUpdated={refreshGlobalData}
+      />
+
+      {/* Yeni Atanan Aramalar & İşletmeler Modalı */}
+      <AssignedLeadsModal
+        isOpen={Boolean(assignedLeadsNotif)}
+        onClose={() => setAssignedLeadsNotif(null)}
+        notification={assignedLeadsNotif}
+        authUser={authUser}
+        currentUser={currentUser}
+        onLeadUpdated={refreshGlobalData}
+        onOpenInCallQueue={(leadIds) => {
+          setFilterNotificationLeadIds(leadIds);
+          setActiveTab('calls');
+        }}
       />
 
       {/* Sistem Ayarları ve Google Maps API Anahtarı Modalı */}

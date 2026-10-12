@@ -215,9 +215,14 @@ async function initDb() {
         read INTEGER DEFAULT 0,
         type TEXT DEFAULT 'call_assignment',
         count INTEGER DEFAULT 0,
+        lead_ids TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    try {
+      await client.execute('ALTER TABLE notifications ADD COLUMN lead_ids TEXT');
+    } catch (e) {}
 
     // Bulutfon Dahili Numarası, Bireysel API Anahtarı ve Mod Kolon Göçleri
     try {

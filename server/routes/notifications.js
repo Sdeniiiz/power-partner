@@ -100,27 +100,87 @@ router.post('/mark-read', async (req, res) => {
   }
 });
 
+// Bildirime bağlı işletmeleri listele (Tıklanınca modal ve listede açılacak)
+router.get('/:id/leads', async (req, res) => {
+  try {
+    const notifId = req.params.id;
+    const notif = await db.get('SELECT * FROM notifications WHERE id = ?', notifId);
+    if (!notif) return res.status(404).json({ error: 'Bildirim bulunamadı.' });
+
+    let leads = [];
+
+    // 1. lead_ids alanında kayıtlı ID'ler varsa doğrudan onları getir
+    if (notif.lead_ids) {
+      try {
+        const ids = typeof notif.lead_ids === 'string'
+          ? notif.lead_ids.split(',').map(s => Number(s.trim())).filter(Boolean)
+          : (Array.isArray(notif.lead_ids) ? notif.lead_ids.map(Number).filter(Boolean) : []);
+        
+        if (ids.length > 0) {
+          const ph = ids.map(() => '?').join(',');
+          leads = await db.all(`SELECT * FROM leads WHERE id IN (${ph}) ORDER BY id DESC`, ...ids);
+        }
+      } catch (e) {
+        console.error('lead_ids parse hatası:', e);
+      }
+    }
+
+    // 2. Eğer lead_ids yoksa veya boş döndüyse (eski bildirimler için):
+    // notif.to_user personeline atanmış işletmeleri getir
+    if (leads.length === 0 && notif.to_user && notif.to_user !== 'all' && notif.to_user !== 'admin') {
+      const member = await db.get(
+        'SELECT id, name FROM team_members WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))',
+        notif.to_user.trim()
+      );
+
+      const limit = Number(notif.count) > 0 ? Number(notif.count) : 50;
+
+      if (member) {
+        leads = await db.all(
+          `SELECT * FROM leads 
+           WHERE assigned_caller_id = ? OR LOWER(TRIM(assigned_caller_name)) = LOWER(TRIM(?))
+           ORDER BY updated_at DESC, id DESC LIMIT ?`,
+          member.id, member.name, limit
+        );
+      } else {
+        leads = await db.all(
+          `SELECT * FROM leads 
+           WHERE LOWER(TRIM(assigned_caller_name)) = LOWER(TRIM(?))
+           ORDER BY updated_at DESC, id DESC LIMIT ?`,
+          notif.to_user.trim(), limit
+        );
+      }
+    }
+
+    res.json({ success: true, notification: notif, data: leads });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Yeni bildirim ekle
 router.post('/', async (req, res) => {
   try {
-    const { to_user, title, message, date, time, count, type } = req.body;
+    const { to_user, title, message, date, time, count, type, lead_ids } = req.body;
     if (!to_user || !title || !message) {
       return res.status(400).json({ error: 'to_user, title ve message zorunludur.' });
     }
 
     const todayStr = date || new Date().toISOString().slice(0, 10);
     const timeStr = time || new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    const leadIdsStr = Array.isArray(lead_ids) ? lead_ids.join(',') : (lead_ids || null);
 
     const result = await db.run(
-      `INSERT INTO notifications (to_user, title, message, date, time, read, type, count)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+      `INSERT INTO notifications (to_user, title, message, date, time, read, type, count, lead_ids)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
       to_user.trim(),
       title.trim(),
       message.trim(),
       todayStr,
       timeStr,
       type || 'call_assignment',
-      Number(count) || 0
+      Number(count) || 0,
+      leadIdsStr
     );
 
     const created = await db.get('SELECT * FROM notifications WHERE id = ?', result.lastInsertRowid);

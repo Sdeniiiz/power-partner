@@ -58,6 +58,7 @@ export const addCustomRole = (role) => api.post('/team/roles', { role }).then(re
 
 // Notifications (Step 2)
 export const getNotifications = (user, isAdmin = false) => api.get('/notifications', { params: { user: user || undefined, is_admin: isAdmin ? 'true' : 'false' } }).then(res => res.data);
+export const getNotificationLeads = (id) => api.get(`/notifications/${id}/leads`).then(res => res.data);
 export const markNotificationsRead = (data) => api.post('/notifications/mark-read', data || {}).then(res => res.data);
 export const createNotification = (data) => api.post('/notifications', data).then(res => res.data);
 export const deleteNotification = (id) => api.delete(`/notifications/${id}`).then(res => res.data);

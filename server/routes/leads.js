@@ -370,16 +370,19 @@ router.post('/distribute', async (req, res) => {
         message = `Yönetici size "${assignedLeads[0].name}", "${assignedLeads[1].name}" ve ${count - 2} diğer işletmeyi atadı.`;
       }
 
+      const leadIdsStr = assignedLeads.map(l => l.id).join(',');
+
       notifStmts.push({
-        sql: `INSERT INTO notifications (to_user, title, message, date, time, read, type, count)
-              VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?)`,
+        sql: `INSERT INTO notifications (to_user, title, message, date, time, read, type, count, lead_ids)
+              VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?, ?)`,
         args: [
           callerName,
           title,
           message,
           todayStr,
           timeStr,
-          count
+          count,
+          leadIdsStr
         ]
       });
     }
@@ -764,15 +767,18 @@ router.put('/batch/assign', async (req, res) => {
           message = `Yönetici size "${assignedLeads[0].name}", "${assignedLeads[1].name}" ve ${count - 2} diğer işletmeyi atadı.`;
         }
 
+        const leadIdsStr = assignedLeads.map(l => l.id).join(',');
+
         await db.run(
-          `INSERT INTO notifications (to_user, title, message, date, time, read, type, count)
-           VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?)`,
+          `INSERT INTO notifications (to_user, title, message, date, time, read, type, count, lead_ids)
+           VALUES (?, ?, ?, ?, ?, 0, 'call_assignment', ?, ?)`,
           callerName,
           title,
           message,
           todayStr,
           timeStr,
-          count
+          count,
+          leadIdsStr
         );
       } catch (notifErr) {
         console.error('Batch assign bildirim oluşturma hatası:', notifErr);

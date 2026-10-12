@@ -32,7 +32,8 @@ export default function Navbar({
   authUser,
   onLogout,
   onUpdateAuthUser,
-  onOpenTodayRecalls
+  onOpenTodayRecalls,
+  onOpenAssignedLeads
 }) {
   const isAdmin = authUser?.role === 'admin';
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -340,6 +341,8 @@ export default function Navbar({
                               setShowNotifMenu(false);
                               if (isTodayRecall && onOpenTodayRecalls) {
                                 onOpenTodayRecalls();
+                              } else if (onOpenAssignedLeads) {
+                                onOpenAssignedLeads(notif);
                               } else {
                                 setActiveTab('calls');
                               }
@@ -363,15 +366,19 @@ export default function Navbar({
                               <p className="text-slate-600 text-[11px] mt-0.5 leading-relaxed break-words">
                                 {notif.message}
                               </p>
-                              <div className="flex items-center justify-between mt-1">
+                              <div className="flex items-center justify-between mt-1.5">
                                 {notif.date && (
-                                  <span className="text-[9px] text-slate-400 inline-block">
+                                  <span className="text-[9px] text-slate-400 inline-block font-mono">
                                     {notif.date}
                                   </span>
                                 )}
-                                {isTodayRecall && (
-                                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded-md">
-                                    Listeyi Aç →
+                                {isTodayRecall ? (
+                                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">
+                                    Randevuları Aç →
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 px-2 py-0.5 rounded-md transition-colors">
+                                    İşletmeleri Listele →
                                   </span>
                                 )}
                               </div>

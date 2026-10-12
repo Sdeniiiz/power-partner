@@ -35,7 +35,13 @@ import {
 import InstagramIcon from './InstagramIcon';
 import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote } from '../api';
 
-export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
+export default function CallQueue({ 
+  currentUser, 
+  authUser, 
+  onLeadUpdated,
+  filterNotificationLeadIds,
+  onClearNotificationFilter 
+}) {
   const isAdmin = authUser?.role === 'admin';
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -987,6 +993,34 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         </div>
       )}
 
+      {/* Bildirimden Gelen İşletmeler Bilgi Banner'ı */}
+      {Array.isArray(filterNotificationLeadIds) && filterNotificationLeadIds.length > 0 && (
+        <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border border-blue-200 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3 animate-fade-in shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
+              📢
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-extrabold text-blue-950">
+                Bildirimden Atanan {filterNotificationLeadIds.length} İşletme Listeleniyor
+              </p>
+              <p className="text-[11px] text-blue-700 font-medium">
+                Size yeni atanan aramalar filtrelendi. Tüm aramaları görmek için filtreyi temizleyebilirsiniz.
+              </p>
+            </div>
+          </div>
+          {onClearNotificationFilter && (
+            <button
+              type="button"
+              onClick={onClearNotificationFilter}
+              className="text-xs font-extrabold text-blue-700 hover:text-blue-900 px-3.5 py-1.5 bg-white rounded-xl border border-blue-300 hover:bg-blue-100 transition-colors cursor-pointer shrink-0 shadow-xs"
+            >
+              ✕ Filtreyi Temizle
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Arama Kartları / Tablosu */}
       {loading ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 text-slate-500">
@@ -1003,7 +1037,10 @@ export default function CallQueue({ currentUser, authUser, onLeadUpdated }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4 min-w-0">
-          {leads.slice(0, visibleLimit).map((lead) => {
+          {(Array.isArray(filterNotificationLeadIds) && filterNotificationLeadIds.length > 0 
+            ? leads.filter(l => filterNotificationLeadIds.includes(l.id)) 
+            : leads
+          ).slice(0, visibleLimit).map((lead) => {
             const hasPhone = Boolean(lead.phone && lead.phone !== 'Numara Yok');
             const isSelected = selectedLeadIds.includes(lead.id);
 
