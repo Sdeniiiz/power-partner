@@ -21,6 +21,7 @@ export const recordCall = (id, data) => api.post(`/leads/${id}/call`, data).then
 export const requeueUnreachable = () => api.post('/leads/requeue-unreachable').then(res => res.data);
 export const updateBatchStatus = (leadIds, status) => api.post('/leads/batch-status', { leadIds, status }).then(res => res.data);
 export const getLeadFilterMeta = () => api.get('/leads/meta/filters').then(res => res.data);
+export const getDailyActivity = (params) => api.get('/leads/daily-activity', { params }).then(res => res.data);
 export const deleteLead = (id) => api.delete(`/leads/${id}`).then(res => res.data);
 
 export const updateLead = (id, data) => api.put(`/leads/${id}`, data).then(res => res.data);

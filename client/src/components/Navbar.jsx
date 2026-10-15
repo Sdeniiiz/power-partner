@@ -33,7 +33,8 @@ export default function Navbar({
   onLogout,
   onUpdateAuthUser,
   onOpenTodayRecalls,
-  onOpenAssignedLeads
+  onOpenAssignedLeads,
+  onOpenDailyActivity
 }) {
   const isAdmin = authUser?.role === 'admin';
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -285,6 +286,18 @@ export default function Navbar({
           {/* Sağ Alan: Aktif Kullanıcı & Ayarlar & Çıkış */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0 relative">
             
+            {/* Yönetici Günlük Analiz Butonu */}
+            {isAdmin && onOpenDailyActivity && (
+              <button
+                type="button"
+                onClick={onOpenDailyActivity}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-900 border border-indigo-200/90 rounded-xl text-xs font-black shadow-2xs transition-all cursor-pointer"
+                title="Tüm aramalar, randevular ve işlerin gün gün analiz raporu"
+              >
+                <span>📊 Günlük Analiz</span>
+              </button>
+            )}
+
             {/* Bildirim Çanı & Menüsü (Step 2 - 🔔) */}
             <div className="relative shrink-0" ref={notifMenuRef}>
               <button

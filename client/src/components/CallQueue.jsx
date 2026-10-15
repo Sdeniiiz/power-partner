@@ -33,6 +33,7 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
+import DailyActivityModal from './DailyActivityModal';
 import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote } from '../api';
 
 export default function CallQueue({ 
@@ -40,7 +41,9 @@ export default function CallQueue({
   authUser, 
   onLeadUpdated,
   filterNotificationLeadIds,
-  onClearNotificationFilter 
+  onClearNotificationFilter,
+  activityDateFilter: propActivityDateFilter,
+  onActivityDateChange
 }) {
   const isAdmin = authUser?.role === 'admin';
   const [leads, setLeads] = useState([]);
@@ -55,6 +58,19 @@ export default function CallQueue({
   const [ratingFilter, setRatingFilter] = useState('');
   const [metaFilters, setMetaFilters] = useState({ districts: [], categories: [], callers: [] });
   const [calledByFilter, setCalledByFilter] = useState('');
+  const [activityDateFilter, setActivityDateFilter] = useState(propActivityDateFilter || '');
+  const [showDailyActivityModal, setShowDailyActivityModal] = useState(false);
+
+  useEffect(() => {
+    if (propActivityDateFilter !== undefined) {
+      setActivityDateFilter(propActivityDateFilter || '');
+    }
+  }, [propActivityDateFilter]);
+
+  const updateActivityDate = (newDate) => {
+    setActivityDateFilter(newDate);
+    onActivityDateChange?.(newDate);
+  };
   const [sortOption, setSortOption] = useState('priority'); // 'priority' | 'date_desc' | 'date_asc' | 'score_desc' | 'score_asc' | 'last_called_desc' | 'last_called_asc' | 'call_count_desc' | 'call_count_asc' | 'rating_desc' | 'name_asc' | 'name_desc'
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
@@ -122,6 +138,7 @@ export default function CallQueue({
         min_rating: ratingFilter || undefined,
         assigned_caller_id: assignedCallerFilter !== '' ? assignedCallerFilter : undefined,
         called_by: calledByFilter !== '' ? calledByFilter : undefined,
+        activity_date: activityDateFilter !== '' ? activityDateFilter : undefined,
         sort: sortOption,
         limit: 2000
       });
@@ -139,12 +156,12 @@ export default function CallQueue({
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, sortOption]);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, activityDateFilter, sortOption]);
 
   // Filtreler veya arama değiştiğinde 25'li kademeli yüklemeyi sıfırla
   useEffect(() => {
     setVisibleLimit(25);
-  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, searchQuery, sortOption]);
+  }, [statusFilter, districtFilter, categoryFilter, phoneTypeFilter, websiteFilter, instagramFilter, ratingFilter, assignedCallerFilter, calledByFilter, activityDateFilter, searchQuery, sortOption]);
 
   // 2. ADIM: Hızlı Dağıtım Fonksiyonları
   const handleQuickAssignToUser = async () => {
@@ -285,6 +302,7 @@ export default function CallQueue({
     ratingFilter,
     assignedCallerFilter,
     calledByFilter,
+    activityDateFilter,
     searchQuery
   ].filter(Boolean).length;
 
@@ -297,6 +315,7 @@ export default function CallQueue({
     setRatingFilter('');
     setAssignedCallerFilter('');
     setCalledByFilter('');
+    updateActivityDate('');
     setSearchQuery('');
     setSortOption('priority');
     loadLeads('');
@@ -835,6 +854,58 @@ export default function CallQueue({
               <option value="name_desc">🔤 İsim (Z → A)</option>
             </select>
           </div>
+
+          {/* Yönetici Günlük Aktivite & Analiz Tarihi Filtresi */}
+          <div className="min-w-0">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-extrabold text-indigo-900 uppercase tracking-wider flex items-center gap-1 truncate">
+                <Calendar className="w-3 h-3 text-indigo-600" />
+                <span>Günlük Analiz</span>
+              </label>
+              {activityDateFilter && (
+                <button
+                  type="button"
+                  onClick={() => updateActivityDate('')}
+                  className="text-[10px] font-extrabold text-rose-600 hover:text-rose-800 cursor-pointer"
+                  title="Tarih filtresini temizle"
+                >
+                  ✕ Temizle
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                value={activityDateFilter}
+                onChange={(e) => updateActivityDate(e.target.value)}
+                className={`w-full min-w-0 text-xs rounded-xl px-2.5 py-1.5 font-bold cursor-pointer transition-all border ${
+                  activityDateFilter 
+                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs ring-2 ring-indigo-400/30' 
+                    : 'bg-indigo-50/70 border-indigo-200 text-indigo-950 hover:bg-indigo-100'
+                }`}
+                title="Seçilen güne ait tüm aramaları, randevuları ve işleri listeler (Örn: 15 Ekim)"
+              />
+              {activityDateFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setShowDailyActivityModal(true)}
+                  className="px-2.5 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-black shadow-xs shrink-0 cursor-pointer flex items-center gap-1"
+                  title="Detaylı Günlük Analiz Raporunu Aç"
+                >
+                  📊 Rapor
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => updateActivityDate(new Date().toISOString().slice(0, 10))}
+                  className="px-2 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 rounded-xl text-[10px] font-extrabold shrink-0 cursor-pointer"
+                  title="Bugünün tarihini seç"
+                >
+                  Bugün
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1018,6 +1089,46 @@ export default function CallQueue({
               ✕ Filtreyi Temizle
             </button>
           )}
+        </div>
+      )}
+
+      {/* Günlük Aktivite Tarihi Bilgi Banner'ı */}
+      {activityDateFilter && (
+        <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-200 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-extrabold text-base shadow-sm shadow-indigo-200 shrink-0">
+              📅
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-indigo-950 text-sm sm:text-base">
+                  {activityDateFilter} Tarihli Günlük Aktiviteler Listeleniyor
+                </span>
+                <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                  {leads.length} İşletme Bulundu
+                </span>
+              </div>
+              <p className="text-xs text-indigo-700 font-medium mt-0.5">
+                Bu tarihte arama yapılanlar, aranacak randevular, saha ziyaretleri ve yapılan işler filtrelendi.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowDailyActivityModal(true)}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <span>📊 Detaylı Günlük Analiz Paneli</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActivityDateFilter('')}
+              className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 transition-colors cursor-pointer"
+            >
+              ✕ Temizle
+            </button>
+          </div>
         </div>
       )}
 
@@ -1915,6 +2026,18 @@ export default function CallQueue({
           </div>
         </div>
       )}
+
+      {/* Yönetici Günlük Aktivite & Analiz Modalı */}
+      <DailyActivityModal
+        isOpen={showDailyActivityModal}
+        onClose={() => setShowDailyActivityModal(false)}
+        initialDate={activityDateFilter || new Date().toISOString().slice(0, 10)}
+        teamMembers={teamMembers}
+        authUser={authUser}
+        onOpenInCallQueue={(dateStr) => {
+          updateActivityDate(dateStr);
+        }}
+      />
 
     </div>
   );

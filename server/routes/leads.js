@@ -405,6 +405,247 @@ router.post('/distribute', async (req, res) => {
 });
 
 
+// Yönetici Günlük Aktivite & Analiz Raporu (Aramalar, Aranacaklar, Görüşülenler, Yapılan İşler, Randevular)
+router.get('/daily-activity', async (req, res) => {
+  try {
+    const { date, caller_name } = req.query;
+    const targetDate = date ? date.trim() : new Date().toISOString().slice(0, 10);
+
+    // 1. O gün yapılan aramalar & görüşülenler (call_logs)
+    let callsQuery = `
+      SELECT 
+        cl.id as log_id,
+        cl.lead_id,
+        cl.outcome,
+        cl.caller_name,
+        cl.notes,
+        cl.created_at,
+        l.name as lead_name,
+        l.phone as lead_phone,
+        l.district as lead_district,
+        l.category as lead_category,
+        l.status as lead_status,
+        l.score as lead_score
+      FROM call_logs cl
+      JOIN leads l ON cl.lead_id = l.id
+      WHERE (DATE(cl.created_at, 'localtime') = ? OR cl.created_at LIKE ?)
+    `;
+    const callParams = [targetDate, `${targetDate}%`];
+
+    if (caller_name && caller_name !== 'all') {
+      callsQuery += ' AND LOWER(TRIM(cl.caller_name)) = LOWER(TRIM(?))';
+      callParams.push(caller_name.trim());
+    }
+
+    callsQuery += ' ORDER BY cl.created_at DESC';
+
+    // 2. O gün aranacak olan randevular (leads recall_date)
+    let recallsQuery = `
+      SELECT 
+        l.id as lead_id,
+        l.name as lead_name,
+        l.phone as lead_phone,
+        l.district as lead_district,
+        l.category as lead_category,
+        l.status as lead_status,
+        l.recall_date,
+        l.recall_time,
+        l.call_notes,
+        l.score as lead_score,
+        l.assigned_caller_name,
+        l.assigned_caller_id
+      FROM leads l
+      WHERE l.recall_date = ?
+    `;
+    const recallParams = [targetDate];
+
+    if (caller_name && caller_name !== 'all') {
+      recallsQuery += ' AND LOWER(TRIM(l.assigned_caller_name)) = LOWER(TRIM(?))';
+      recallParams.push(caller_name.trim());
+    }
+
+    recallsQuery += ' ORDER BY l.recall_time ASC, l.id DESC';
+
+    // 3. O gün saha ziyareti / randevusu olanlar (leads visit_date)
+    let visitsQuery = `
+      SELECT 
+        l.id as lead_id,
+        l.name as lead_name,
+        l.phone as lead_phone,
+        l.address as lead_address,
+        l.district as lead_district,
+        l.category as lead_category,
+        l.status as lead_status,
+        l.visit_date,
+        l.call_notes,
+        l.score as lead_score,
+        l.assigned_caller_name
+      FROM leads l
+      WHERE (l.visit_date LIKE ? OR DATE(l.visit_date) = ?)
+    `;
+    const visitParams = [`${targetDate}%`, targetDate];
+
+    if (caller_name && caller_name !== 'all') {
+      visitsQuery += ' AND LOWER(TRIM(l.assigned_caller_name)) = LOWER(TRIM(?))';
+      visitParams.push(caller_name.trim());
+    }
+
+    visitsQuery += ' ORDER BY l.visit_date ASC';
+
+    // 4. O gün teslim edilecek veya yapılan işler (jobs)
+    let jobsQuery = `
+      SELECT 
+        j.id as job_id,
+        j.lead_id,
+        j.title,
+        j.products,
+        j.status as job_status,
+        j.due_date,
+        j.notes as job_notes,
+        j.created_at as job_created_at,
+        l.name as lead_name,
+        l.phone as lead_phone,
+        l.district as lead_district,
+        c.name as category_name,
+        c.color as category_color,
+        m.name as member_name,
+        m.color as member_color
+      FROM jobs j
+      JOIN leads l ON j.lead_id = l.id
+      LEFT JOIN categories c ON j.category_id = c.id
+      LEFT JOIN team_members m ON j.assigned_member_id = m.id
+      WHERE (j.due_date = ? OR DATE(j.created_at, 'localtime') = ? OR DATE(j.updated_at, 'localtime') = ?)
+    `;
+    const jobParams = [targetDate, targetDate, targetDate];
+
+    if (caller_name && caller_name !== 'all') {
+      jobsQuery += ' AND LOWER(TRIM(m.name)) = LOWER(TRIM(?))';
+      jobParams.push(caller_name.trim());
+    }
+
+    jobsQuery += ' ORDER BY j.id DESC';
+
+    // Tüm sorguları eşzamanlı çalıştır
+    const [calls, recalls, visits, jobs] = await Promise.all([
+      db.all(callsQuery, ...callParams),
+      db.all(recallsQuery, ...recallParams),
+      db.all(visitsQuery, ...visitParams),
+      db.all(jobsQuery, ...jobParams)
+    ]);
+
+    // İstatistik ve dağılımlar
+    const callerCounts = {};
+    const outcomeCounts = {};
+
+    calls.forEach(c => {
+      const caller = c.caller_name || 'Bilinmiyor';
+      callerCounts[caller] = (callerCounts[caller] || 0) + 1;
+      const outcome = c.outcome || 'diger';
+      outcomeCounts[outcome] = (outcomeCounts[outcome] || 0) + 1;
+    });
+
+    // O güne ait benzersiz lead ID'leri
+    const leadIdSet = new Set();
+    calls.forEach(c => leadIdSet.add(c.lead_id));
+    recalls.forEach(r => leadIdSet.add(r.lead_id));
+    visits.forEach(v => leadIdSet.add(v.lead_id));
+    jobs.forEach(j => leadIdSet.add(j.lead_id));
+
+    // Kronolojik birleşik zaman çizelgesi (timeline)
+    const timeline = [];
+
+    calls.forEach(c => {
+      timeline.push({
+        id: `call_${c.log_id}`,
+        type: 'call',
+        title: `📞 Arama: ${c.lead_name}`,
+        subtitle: `${c.caller_name} aradı • Sonuç: ${c.outcome}`,
+        time: c.created_at,
+        lead_id: c.lead_id,
+        lead_name: c.lead_name,
+        lead_phone: c.lead_phone,
+        lead_district: c.lead_district,
+        actor: c.caller_name,
+        notes: c.notes,
+        outcome: c.outcome
+      });
+    });
+
+    recalls.forEach(r => {
+      timeline.push({
+        id: `recall_${r.lead_id}`,
+        type: 'recall',
+        title: `⏰ Arama Randevusu: ${r.lead_name}`,
+        subtitle: `Planlanan Saat: ${r.recall_time || 'Gündüz'} • Sorumlu: ${r.assigned_caller_name || 'Ortak Havuz'}`,
+        time: `${r.recall_date} ${r.recall_time || '10:00'}`,
+        lead_id: r.lead_id,
+        lead_name: r.lead_name,
+        lead_phone: r.phone,
+        lead_district: r.district,
+        actor: r.assigned_caller_name,
+        notes: r.call_notes
+      });
+    });
+
+    visits.forEach(v => {
+      timeline.push({
+        id: `visit_${v.lead_id}`,
+        type: 'visit',
+        title: `🤝 Saha Ziyareti: ${v.lead_name}`,
+        subtitle: `Ziyaret: ${v.visit_date} • Adres: ${v.lead_address || v.lead_district}`,
+        time: v.visit_date,
+        lead_id: v.lead_id,
+        lead_name: v.lead_name,
+        lead_phone: v.phone,
+        lead_district: v.district,
+        actor: v.assigned_caller_name,
+        notes: v.call_notes
+      });
+    });
+
+    jobs.forEach(j => {
+      timeline.push({
+        id: `job_${j.job_id}`,
+        type: 'job',
+        title: `💼 İş / Görev: ${j.title}`,
+        subtitle: `Sorumlu: ${j.member_name || 'Ekip'} • Durum: ${j.job_status}`,
+        time: j.due_date || j.job_created_at,
+        lead_id: j.lead_id,
+        lead_name: j.lead_name,
+        lead_phone: j.lead_phone,
+        lead_district: j.lead_district,
+        actor: j.member_name,
+        notes: j.job_notes
+      });
+    });
+
+    // Zaman çizelgesini tarihe ve saate göre sırala (En son olan en üstte)
+    timeline.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+
+    res.json({
+      success: true,
+      date: targetDate,
+      summary: {
+        total_calls: calls.length,
+        total_recalls: recalls.length,
+        total_visits: visits.length,
+        total_jobs: jobs.length,
+        total_unique_leads: leadIdSet.size,
+        callers: Object.entries(callerCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+        outcomes: Object.entries(outcomeCounts).map(([outcome, count]) => ({ outcome, count })).sort((a, b) => b.count - a.count)
+      },
+      calls,
+      recalls,
+      visits,
+      jobs,
+      lead_ids: Array.from(leadIdSet),
+      timeline
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // İlçe ve Sektör/Kategori filtre seçeneklerini getir (Hızlı Paralel & Önbellekli)
 router.get('/meta/filters', async (req, res) => {
   try {
@@ -440,6 +681,7 @@ router.get('/', async (req, res) => {
       status, district, category, phone_type, search,
       has_website, has_instagram, min_rating, min_score,
       assigned_caller_id, called_by, is_today_recall,
+      activity_date,
       sort,
       limit = 2000 
     } = req.query;
@@ -508,6 +750,18 @@ router.get('/', async (req, res) => {
     // Bugün Aranacak Randevular Filtresi
     if (is_today_recall === '1') {
       query += " AND status = 'randevu_arama' AND (recall_date <= DATE('now', 'localtime') OR recall_date IS NULL)";
+    }
+
+    // Günlük Aktivite & Tarih Filtresi (O gün aranan, randevusu olan veya işi olan işletmeler)
+    if (activity_date && activity_date.trim()) {
+      const d = activity_date.trim();
+      query += ` AND (
+        id IN (SELECT DISTINCT lead_id FROM call_logs WHERE DATE(created_at, 'localtime') = ? OR created_at LIKE ?)
+        OR recall_date = ?
+        OR visit_date LIKE ?
+        OR id IN (SELECT DISTINCT lead_id FROM jobs WHERE due_date = ? OR DATE(created_at, 'localtime') = ?)
+      )`;
+      params.push(d, `${d}%`, d, `${d}%`, d, d);
     }
 
     // Sıralama (Sort By): Tarihe göre artan/azalan, puana göre, son aramaya göre vb.

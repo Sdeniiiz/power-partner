@@ -9,6 +9,7 @@ import SettingsModal from './components/SettingsModal';
 import LoginModal from './components/LoginModal';
 import TodayRecallsModal from './components/TodayRecallsModal';
 import AssignedLeadsModal from './components/AssignedLeadsModal';
+import DailyActivityModal from './components/DailyActivityModal';
 import { getSettings, getLeads, getTeamMembers, getCategories } from './api';
 
 export default function App() {
@@ -29,8 +30,10 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTodayRecallsOpen, setIsTodayRecallsOpen] = useState(false);
+  const [isDailyActivityOpen, setIsDailyActivityOpen] = useState(false);
   const [assignedLeadsNotif, setAssignedLeadsNotif] = useState(null);
   const [filterNotificationLeadIds, setFilterNotificationLeadIds] = useState(null);
+  const [activityDateFilter, setActivityDateFilter] = useState('');
 
   const isAdmin = authUser?.role === 'admin';
 
@@ -115,6 +118,7 @@ export default function App() {
         onUpdateAuthUser={handleUpdateAuthUser}
         onOpenTodayRecalls={() => setIsTodayRecallsOpen(true)}
         onOpenAssignedLeads={(notif) => setAssignedLeadsNotif(notif)}
+        onOpenDailyActivity={() => setIsDailyActivityOpen(true)}
       />
 
       {/* Ana İçerik Alanı */}
@@ -140,6 +144,8 @@ export default function App() {
             onLeadUpdated={refreshGlobalData}
             filterNotificationLeadIds={filterNotificationLeadIds}
             onClearNotificationFilter={() => setFilterNotificationLeadIds(null)}
+            activityDateFilter={activityDateFilter}
+            onActivityDateChange={setActivityDateFilter}
           />
         )}
 
@@ -201,6 +207,20 @@ export default function App() {
         categories={categories}
         authUser={authUser}
         onLogout={handleLogout}
+      />
+
+      {/* Yönetici Günlük Faaliyet & Analiz Paneli Modalı (Navbar'dan tetiklenen) */}
+      <DailyActivityModal
+        isOpen={isDailyActivityOpen}
+        onClose={() => setIsDailyActivityOpen(false)}
+        initialDate={activityDateFilter || new Date().toISOString().slice(0, 10)}
+        teamMembers={teamMembers}
+        authUser={authUser}
+        onOpenInCallQueue={(dateStr) => {
+          setActivityDateFilter(dateStr);
+          setIsDailyActivityOpen(false);
+          setActiveTab('calls');
+        }}
       />
 
       {/* Alt Bilgi */}
