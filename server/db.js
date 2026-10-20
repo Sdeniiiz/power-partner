@@ -139,16 +139,18 @@ async function initDb() {
       { name: 'is_verified_location', type: 'INTEGER DEFAULT 1' },
       { name: 'actual_district', type: 'TEXT' },
       { name: 'website_status', type: "TEXT DEFAULT 'unknown'" },
-      { name: 'phone_status', type: "TEXT DEFAULT 'valid'" }
+      { name: 'phone_status', type: "TEXT DEFAULT 'valid'" },
+      { name: 'field_member_id', type: 'INTEGER' },
+      { name: 'field_member_name', type: 'TEXT' },
+      { name: 'field_route_order', type: 'INTEGER DEFAULT 9999' },
+      { name: 'field_visit_status', type: "TEXT DEFAULT 'bekliyor'" }
     ];
 
-    for (const col of leadColumnsToAdd) {
-      try {
-        await client.execute(`ALTER TABLE leads ADD COLUMN ${col.name} ${col.type}`);
-      } catch (err) {
-        // Zaten varsa sqlite hata verir, güvenle yoksay
-      }
-    }
+    await Promise.all(
+      leadColumnsToAdd.map(col =>
+        client.execute(`ALTER TABLE leads ADD COLUMN ${col.name} ${col.type}`).catch(() => {})
+      )
+    );
 
     await client.execute(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -267,6 +269,21 @@ async function initDb() {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_owner_assistant_memory_lead ON owner_assistant_memory(source_lead_id, created_at DESC);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_notifications_to_user ON notifications(to_user);');
     await client.execute('CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);');
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_leads_field_member ON leads(field_member_id, field_route_order);');
+
+    // Mevcut randevu (yüz yüze ziyaret) durumundaki işletmelerden saha personeli atanmamış olanları varsayılan Saha Satış personeline bağla
+    try {
+      const fieldStaffRes = await client.execute("SELECT id, name FROM team_members WHERE LOWER(role) LIKE '%saha%' ORDER BY id ASC LIMIT 1");
+      if (fieldStaffRes.rows && fieldStaffRes.rows.length > 0) {
+        const defaultFieldStaff = fieldStaffRes.rows[0];
+        await client.execute({
+          sql: `UPDATE leads SET field_member_id = ?, field_member_name = ?, field_visit_status = COALESCE(field_visit_status, 'bekliyor') WHERE status = 'randevu' AND field_member_id IS NULL`,
+          args: [defaultFieldStaff.id, defaultFieldStaff.name]
+        });
+      }
+    } catch (e) {
+      // Yoksay
+    }
 
     console.log('✅ Turso veritabanı tabloları ve indeksleri hazır.');
   } catch (err) {
@@ -274,7 +291,7 @@ async function initDb() {
   }
 }
 
-initDb().catch(console.error);
+db.ready = initDb().catch(console.error);
 
 module.exports = db;
 

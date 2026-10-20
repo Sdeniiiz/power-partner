@@ -23,12 +23,17 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote } from '../api';
+import FieldRouteView from './FieldRouteView';
+import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote, isFieldStaffRole, isAdminOrManagerRole } from '../api';
 
 export default function MemberDashboard({ currentUser, teamMembers = [], authUser, onJobUpdated }) {
-  const isAdmin = authUser?.role === 'admin';
+  const isAdmin = authUser?.role === 'admin' || isAdminOrManagerRole(authUser?.role);
+  const canAccessFieldRoute =
+    isAdmin ||
+    isFieldStaffRole(authUser?.role) ||
+    isFieldStaffRole(currentUser?.role);
   const [activeMember, setActiveMember] = useState(currentUser || (teamMembers[0] || null));
-  const [viewMode, setViewMode] = useState('calls'); // 'calls' | 'jobs'
+  const [viewMode, setViewMode] = useState('calls'); // 'calls' | 'jobs' | 'field_route'
   const [sortOption, setSortOption] = useState('priority');
   
   // İşler (Jobs) State
@@ -54,6 +59,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
   const [recallTime, setRecallTime] = useState('14:00');
   const [visitDate, setVisitDate] = useState('');
   const [modalScore, setModalScore] = useState(0);
+  const [modalFieldMemberId, setModalFieldMemberId] = useState('');
   const [submittingCall, setSubmittingCall] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
@@ -63,15 +69,19 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
     }
   }, [currentUser]);
 
-  // Eğer personelin rolü soğuk arama/çağrı ise varsayılan arama ekranı olsun
+  // Eğer personelin rolü saha satış ise ve yetkisi varsa saha rotası, soğuk arama ise arama ekranı olsun
   useEffect(() => {
     if (activeMember) {
-      const isCaller = /arama|satış|satis|çağrı|cagri/i.test(activeMember.role || '');
-      if (isCaller) {
-        setViewMode('calls');
+      if (canAccessFieldRoute && isFieldStaffRole(activeMember.role)) {
+        setViewMode('field_route');
+      } else {
+        const isCaller = /arama|satış|satis|çağrı|cagri/i.test(activeMember.role || '');
+        if (isCaller) {
+          setViewMode('calls');
+        }
       }
     }
-  }, [activeMember]);
+  }, [activeMember, canAccessFieldRoute]);
 
   // Personelin İşlerini Yükle
   const loadMemberJobs = async () => {
@@ -196,6 +206,8 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
     setRecallTime(lead.recall_time || '14:00');
     setVisitDate(lead.visit_date || '');
     setModalScore(lead.score || 0);
+    const defaultField = teamMembers.find(m => isFieldStaffRole(m.role));
+    setModalFieldMemberId(lead.field_member_id ? String(lead.field_member_id) : (defaultField ? String(defaultField.id) : ''));
   };
 
   // Çağrı Kararını Kaydetme
@@ -215,17 +227,18 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
     setSubmittingCall(true);
     try {
       const activeCallerName = authUser?.name || activeMember?.name || 'Personel';
-      await recordCall(activeCallModal.id, {
+      const res = await recordCall(activeCallModal.id, {
         outcome,
         notes: callNotes,
         caller_name: activeCallerName,
         visit_date: visitDate || null,
         recall_date: recallDate || null,
         recall_time: recallTime || null,
-        score: modalScore || 0
+        score: modalScore || 0,
+        field_member_id: outcome === 'randevu' ? (modalFieldMemberId || undefined) : undefined
       });
 
-      setActionSuccessMsg(`Arama sonucu '${outcome}' olarak başarıyla kaydedildi.`);
+      setActionSuccessMsg(res?.message || `Arama sonucu '${outcome}' olarak başarıyla kaydedildi.`);
       setActiveCallModal(null);
       setCallNotes('');
       setRecallDate('');
@@ -394,8 +407,23 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
         </div>
       )}
 
-      {/* ANA GÖRÜNÜM DEĞİŞTİRİCİ: ARAMA GÖREVLERİM vs İŞ & TESLİMATLAR */}
-      <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-xs flex items-center gap-1.5 w-full max-w-lg">
+      {/* ANA GÖRÜNÜM DEĞİŞTİRİCİ: ARAMA GÖREVLERİM vs İŞ & TESLİMATLAR vs SAHA ROTAM */}
+      <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-xs flex flex-wrap items-center gap-1.5 w-full max-w-2xl">
+        {canAccessFieldRoute && (isAdmin || isFieldStaffRole(activeMember?.role)) && (
+          <button
+            type="button"
+            onClick={() => setViewMode('field_route')}
+            className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              viewMode === 'field_route'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100'
+            }`}
+          >
+            <MapPin className="w-4 h-4" />
+            <span>🚗 Saha Rotam & Sıralama</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => setViewMode('calls')}
@@ -432,6 +460,18 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
           )}
         </button>
       </div>
+
+      {/* ======================================================== */}
+      {/* SAHA ROTAM GÖRÜNÜMÜ (YALNIZCA ADMİN VE SAHA PERSONELİ) */}
+      {/* ======================================================== */}
+      {viewMode === 'field_route' && canAccessFieldRoute && (
+        <FieldRouteView
+          currentUser={activeMember}
+          authUser={authUser}
+          teamMembers={teamMembers}
+          onLeadUpdated={onJobUpdated}
+        />
+      )}
 
       {/* ======================================================== */}
       {/* 1. MOD: ÇAĞRI VE ARAMA GÖREVLERİ (6 ADET TALEP EDİLEN BÖLÜM) */}
@@ -1227,18 +1267,40 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
               </div>
             </div>
 
-            {/* 2. Ziyaret Randevusu (Yüz Yüze Ziyaret İçin) */}
-            <div className="mt-3 bg-purple-50/70 border border-purple-200 rounded-2xl p-3">
-              <label className="block text-xs font-bold text-purple-950 mb-1 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-purple-600" />
-                <span>Yüz Yüze Ziyaret Tarihi & Saati:</span>
-              </label>
-              <input
-                type="datetime-local"
-                value={visitDate}
-                onChange={(e) => setVisitDate(e.target.value)}
-                className="w-full text-xs bg-white border border-purple-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-800"
-              />
+            {/* 2. Ziyaret Randevusu & Otomatik Saha Personeli Paslama (Yüz Yüze Ziyaret İçin) */}
+            <div className="mt-3 bg-purple-50/70 border border-purple-200 rounded-2xl p-3 space-y-2.5">
+              <div>
+                <label className="block text-xs font-bold text-purple-950 mb-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Yüz Yüze Ziyaret Tarihi & Saati:</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={visitDate}
+                  onChange={(e) => setVisitDate(e.target.value)}
+                  className="w-full text-xs bg-white border border-purple-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-extrabold text-emerald-900 mb-1">
+                  🚗 Direkt Paslanacak Saha Personeli:
+                </label>
+                <select
+                  value={modalFieldMemberId}
+                  onChange={(e) => setModalFieldMemberId(e.target.value)}
+                  className="w-full text-xs bg-white border border-emerald-300 rounded-xl px-2.5 py-1.5 font-bold text-slate-800"
+                >
+                  {(teamMembers.filter(m => isFieldStaffRole(m.role)).length > 0
+                    ? teamMembers.filter(m => isFieldStaffRole(m.role))
+                    : teamMembers
+                  ).map(m => (
+                    <option key={m.id} value={m.id}>
+                      🚗 {m.name} ({m.role || 'Saha'}) — Otomatik Rotaya Düşer
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Sonuç Butonları */}

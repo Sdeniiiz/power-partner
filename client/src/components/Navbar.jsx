@@ -16,9 +16,10 @@ import {
   X,
   Bell,
   CheckCheck,
-  Phone
+  Phone,
+  Navigation
 } from 'lucide-react';
-import { getNotifications, markNotificationsRead, updateUserBulutfon } from '../api';
+import { getNotifications, markNotificationsRead, updateUserBulutfon, isFieldStaffRole, isAdminOrManagerRole } from '../api';
 
 export default function Navbar({ 
   activeTab, 
@@ -37,6 +38,11 @@ export default function Navbar({
   onOpenDailyActivity
 }) {
   const isAdmin = authUser?.role === 'admin';
+  const canAccessFieldRoute =
+    isAdmin ||
+    isAdminOrManagerRole(authUser?.role) ||
+    isFieldStaffRole(authUser?.role) ||
+    isFieldStaffRole(currentUser?.role);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef(null);
 
@@ -270,6 +276,27 @@ export default function Navbar({
               <span>4. Çalışan Ekranı</span>
             </button>
 
+            {canAccessFieldRoute && (
+              <button
+                onClick={() => setActiveTab('field_route')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all relative ${
+                  activeTab === 'field_route'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/70'
+                }`}
+              >
+                <Navigation className={`w-4 h-4 ${activeTab === 'field_route' ? 'text-white' : 'text-emerald-600'}`} />
+                <span>🚗 Saha Rotam</span>
+                {stats?.randevu > 0 && (
+                  <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full ${
+                    activeTab === 'field_route' ? 'bg-white text-emerald-700' : 'bg-emerald-600 text-white'
+                  }`}>
+                    {stats.randevu}
+                  </span>
+                )}
+              </button>
+            )}
+
             <button
               onClick={() => setActiveTab('calendar')}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
@@ -347,12 +374,15 @@ export default function Navbar({
                     ) : (
                       notifications.map((notif) => {
                         const isTodayRecall = notif.type === 'today_recalls' || (notif.title && notif.title.includes('Bugün Aranacak'));
+                        const isFieldNotif = notif.type === 'field_assignment' || (notif.title && notif.title.includes('Saha Ziyareti'));
                         return (
                           <div
                             key={notif.id}
                             onClick={() => {
                               setShowNotifMenu(false);
-                              if (isTodayRecall && onOpenTodayRecalls) {
+                              if (isFieldNotif && canAccessFieldRoute) {
+                                setActiveTab('field_route');
+                              } else if (isTodayRecall && onOpenTodayRecalls) {
                                 onOpenTodayRecalls();
                               } else if (onOpenAssignedLeads) {
                                 onOpenAssignedLeads(notif);
@@ -582,6 +612,18 @@ export default function Navbar({
           >
             4. Görevler
           </button>
+          {canAccessFieldRoute && (
+            <button
+              onClick={() => setActiveTab('field_route')}
+              className={`flex-shrink-0 text-xs px-2.5 py-1.5 rounded-lg font-extrabold transition-colors ${
+                activeTab === 'field_route'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+              }`}
+            >
+              🚗 Saha Rotam ({stats?.randevu || 0})
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('calendar')}
             className={`flex-shrink-0 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-colors ${

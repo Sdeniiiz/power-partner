@@ -22,7 +22,21 @@ export const requeueUnreachable = () => api.post('/leads/requeue-unreachable').t
 export const updateBatchStatus = (leadIds, status) => api.post('/leads/batch-status', { leadIds, status }).then(res => res.data);
 export const getLeadFilterMeta = () => api.get('/leads/meta/filters').then(res => res.data);
 export const getDailyActivity = (params) => api.get('/leads/daily-activity', { params }).then(res => res.data);
+export const getFieldRoute = (params) => api.get('/leads/field-route', { params }).then(res => res.data);
+export const reorderFieldRoute = (ordered_ids) => api.put('/leads/field-route/reorder', { ordered_ids }).then(res => res.data);
+export const assignToFieldRoute = (data) => api.post('/leads/field-route/assign', data).then(res => res.data);
+export const recordFieldVisit = (id, data) => api.post(`/leads/${id}/field-visit`, data).then(res => res.data);
 export const deleteLead = (id) => api.delete(`/leads/${id}`).then(res => res.data);
+
+export const isFieldStaffRole = (role) => {
+  if (!role || typeof role !== 'string') return false;
+  return /saha/i.test(role);
+};
+
+export const isAdminOrManagerRole = (role) => {
+  if (!role || typeof role !== 'string') return false;
+  return role === 'admin' || /yönetici|yonetici|müdür|mudur|admin/i.test(role);
+};
 
 export const updateLead = (id, data) => api.put(`/leads/${id}`, data).then(res => res.data);
 export const getCampaigns = () => api.get('/leads/campaigns/summary').then(res => res.data);

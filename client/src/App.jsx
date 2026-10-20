@@ -10,7 +10,8 @@ import LoginModal from './components/LoginModal';
 import TodayRecallsModal from './components/TodayRecallsModal';
 import AssignedLeadsModal from './components/AssignedLeadsModal';
 import DailyActivityModal from './components/DailyActivityModal';
-import { getSettings, getLeads, getTeamMembers, getCategories } from './api';
+import FieldRouteView from './components/FieldRouteView';
+import { getSettings, getLeads, getTeamMembers, getCategories, isFieldStaffRole, isAdminOrManagerRole } from './api';
 
 export default function App() {
   const [authUser, setAuthUser] = useState(() => {
@@ -36,12 +37,19 @@ export default function App() {
   const [activityDateFilter, setActivityDateFilter] = useState('');
 
   const isAdmin = authUser?.role === 'admin';
+  const canAccessFieldRoute =
+    isAdmin ||
+    isAdminOrManagerRole(authUser?.role) ||
+    isFieldStaffRole(authUser?.role) ||
+    isFieldStaffRole(currentUser?.role);
 
   // Oturum açıldığında veya değiştiğinde aktif tab ve kullanıcı ayarla
   useEffect(() => {
     if (authUser) {
       if (authUser.role === 'admin') {
         setActiveTab('finder');
+      } else if (isFieldStaffRole(authUser.role)) {
+        setActiveTab('field_route');
       } else {
         setActiveTab('calls');
       }
@@ -165,6 +173,16 @@ export default function App() {
             teamMembers={teamMembers}
             authUser={authUser}
             onJobUpdated={refreshGlobalData}
+          />
+        )}
+
+        {/* SAHA ROTAM & ZİYARET SIRALAMASI (YALNIZCA YÖNETİCİ VE SAHA PERSONELİ) */}
+        {activeTab === 'field_route' && canAccessFieldRoute && (
+          <FieldRouteView
+            currentUser={currentUser}
+            authUser={authUser}
+            teamMembers={teamMembers}
+            onLeadUpdated={refreshGlobalData}
           />
         )}
 

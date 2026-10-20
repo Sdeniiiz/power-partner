@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
 import DailyActivityModal from './DailyActivityModal';
-import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote } from '../api';
+import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote, assignToFieldRoute, isFieldStaffRole } from '../api';
 
 export default function CallQueue({ 
   currentUser, 
@@ -81,6 +81,7 @@ export default function CallQueue({
   const [recallDate, setRecallDate] = useState('');
   const [recallTime, setRecallTime] = useState('14:00');
   const [modalScore, setModalScore] = useState(0);
+  const [modalFieldMemberId, setModalFieldMemberId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
@@ -342,17 +343,18 @@ export default function CallQueue({
     setSubmitting(true);
     try {
       const activeCallerName = authUser?.name || currentUser?.name || 'Operatör';
-      await recordCall(activeCallModal.id, {
+      const res = await recordCall(activeCallModal.id, {
         outcome,
         notes: callNotes,
         caller_name: activeCallerName,
         visit_date: visitDate || null,
         recall_date: recallDate || null,
         recall_time: recallTime || null,
-        score: modalScore || 0
+        score: modalScore || 0,
+        field_member_id: outcome === 'randevu' ? (modalFieldMemberId || undefined) : undefined
       });
 
-      setActionSuccessMsg(`Arama sonucu '${outcome}' olarak kaydedildi.`);
+      setActionSuccessMsg(res?.message || `Arama sonucu '${outcome}' olarak kaydedildi.`);
       setActiveCallModal(null);
       setCallNotes('');
       setVisitDate('');
@@ -389,6 +391,34 @@ export default function CallQueue({
     setRecallDate(lead.recall_date || '');
     setRecallTime(lead.recall_time || '14:00');
     setModalScore(lead.score || 0);
+    const defaultField = teamMembers.find(m => isFieldStaffRole(m.role));
+    setModalFieldMemberId(lead.field_member_id ? String(lead.field_member_id) : (defaultField ? String(defaultField.id) : ''));
+  };
+
+  // Yönetici İçin Seçilenleri Doğrudan Saha Personeline Paslama
+  const handleBatchPassToField = async () => {
+    if (selectedLeadIds.length === 0) return;
+    const defaultField = teamMembers.find(m => isFieldStaffRole(m.role)) || teamMembers[0];
+    const targetName = defaultField ? defaultField.name : 'Saha Personeli';
+    if (!confirm(`Seçilen ${selectedLeadIds.length} işletmeyi saha personeli (${targetName}) rotasına paslamak istediğinize emin misiniz?`)) return;
+
+    setBatchActionLoading(true);
+    try {
+      const res = await assignToFieldRoute({
+        lead_ids: selectedLeadIds,
+        field_member_id: defaultField?.id,
+        assigned_by: authUser?.name || currentUser?.name || 'Yönetici'
+      });
+      setActionSuccessMsg(res.message || `${selectedLeadIds.length} işletme saha rotasına paslandı.`);
+      setSelectedLeadIds([]);
+      loadLeads();
+      if (onLeadUpdated) onLeadUpdated();
+      setTimeout(() => setActionSuccessMsg(''), 4000);
+    } catch (err) {
+      alert(`Sahaya paslama hatası: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setBatchActionLoading(false);
+    }
   };
 
   const handleBatchDistribute = async () => {
@@ -1054,6 +1084,16 @@ export default function CallQueue({
             <button
               type="button"
               disabled={selectedLeadIds.length === 0 || batchActionLoading}
+              onClick={handleBatchPassToField}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+              title="Seçili işletmeleri doğrudan Saha Personeli rotasına pasla"
+            >
+              <span>🚗 Sahaya Pasla ({selectedLeadIds.length})</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={selectedLeadIds.length === 0 || batchActionLoading}
               onClick={handleBatchRestore}
               className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
             >
@@ -1701,18 +1741,40 @@ export default function CallQueue({
               </div>
             </div>
 
-            {/* 2. Randevu / Ziyaret Tarihi (Yüz Yüze Ziyaret İçin) */}
-            <div className="mt-3 bg-purple-50/70 border border-purple-200 rounded-2xl p-3">
-              <label className="block text-xs font-bold text-purple-950 mb-1 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-purple-600" />
-                <span>Yüz Yüze Ziyaret Tarihi & Saati:</span>
-              </label>
-              <input
-                type="datetime-local"
-                value={visitDate}
-                onChange={(e) => setVisitDate(e.target.value)}
-                className="w-full text-xs bg-white border border-purple-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-800"
-              />
+            {/* 2. Randevu / Ziyaret Tarihi & Otomatik Saha Personeli Paslama (Yüz Yüze Ziyaret İçin) */}
+            <div className="mt-3 bg-purple-50/70 border border-purple-200 rounded-2xl p-3 space-y-2.5">
+              <div>
+                <label className="block text-xs font-bold text-purple-950 mb-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Yüz Yüze Ziyaret Tarihi & Saati:</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={visitDate}
+                  onChange={(e) => setVisitDate(e.target.value)}
+                  className="w-full text-xs bg-white border border-purple-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-extrabold text-emerald-900 mb-1">
+                  🚗 Direkt Paslanacak Saha Personeli:
+                </label>
+                <select
+                  value={modalFieldMemberId}
+                  onChange={(e) => setModalFieldMemberId(e.target.value)}
+                  className="w-full text-xs bg-white border border-emerald-300 rounded-xl px-2.5 py-1.5 font-bold text-slate-800"
+                >
+                  {(teamMembers.filter(m => isFieldStaffRole(m.role)).length > 0
+                    ? teamMembers.filter(m => isFieldStaffRole(m.role))
+                    : teamMembers
+                  ).map(m => (
+                    <option key={m.id} value={m.id}>
+                      🚗 {m.name} ({m.role || 'Saha'}) — Otomatik Rotaya Düşer
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Diyagram Butonları: Sonuç İşaretleme (6. Adım) */}

@@ -839,6 +839,227 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ==========================================
+// SAHA PERSONELİ ROTASI & SAHA ZİYARET YÖNETİMİ
+// ==========================================
+
+// Varsayılan saha personelini bulma yardımcısı
+async function getDefaultFieldMember(requestedMemberId = null) {
+  if (requestedMemberId) {
+    const member = await db.get('SELECT id, name, role FROM team_members WHERE id = ?', Number(requestedMemberId));
+    if (member) return member;
+  }
+  const fieldMember = await db.get("SELECT id, name, role FROM team_members WHERE LOWER(role) LIKE '%saha%' ORDER BY id ASC LIMIT 1");
+  return fieldMember || null;
+}
+
+// 1. Saha Rotası Listesini Getir (Bekleyen ve Tamamlanan Saha Ziyaretleri, Sıralı)
+router.get('/field-route', async (req, res) => {
+  try {
+    const { field_member_id, district, visit_status } = req.query;
+
+    // İlk çalışmada eğer status='randevu' olup field_member_id atanmamış kayıt varsa otomatik bağla
+    const defaultField = await getDefaultFieldMember();
+    if (defaultField) {
+      await db.run(
+        `UPDATE leads 
+         SET field_member_id = ?, field_member_name = ?, field_visit_status = COALESCE(field_visit_status, 'bekliyor')
+         WHERE status = 'randevu' AND field_member_id IS NULL`,
+        defaultField.id,
+        defaultField.name
+      );
+    }
+
+    let query = `
+      SELECT * FROM leads 
+      WHERE (status = 'randevu' OR field_member_id IS NOT NULL)
+    `;
+    const params = [];
+
+    if (field_member_id && field_member_id !== 'all') {
+      query += ' AND field_member_id = ?';
+      params.push(Number(field_member_id));
+    }
+
+    if (district && district !== 'all' && district !== '') {
+      query += ' AND district = ?';
+      params.push(district);
+    }
+
+    if (visit_status && visit_status !== 'all') {
+      if (visit_status === 'bekliyor') {
+        query += " AND (status = 'randevu' AND COALESCE(field_visit_status, 'bekliyor') = 'bekliyor')";
+      } else if (visit_status === 'tamamlandi') {
+        query += " AND (field_visit_status = 'ziyaret_edildi' OR status IN ('satis_havuzu', 'is_dagitildi'))";
+      }
+    }
+
+    query += `
+      ORDER BY 
+        CASE WHEN status = 'randevu' AND COALESCE(field_visit_status, 'bekliyor') = 'bekliyor' THEN 0 ELSE 1 END ASC,
+        COALESCE(field_route_order, 9999) ASC,
+        CASE WHEN visit_date IS NULL OR visit_date = '' THEN 1 ELSE 0 END ASC,
+        visit_date ASC,
+        id DESC
+    `;
+
+    const rows = await db.all(query, ...params);
+
+    // Bekleyen ziyaretlere temiz sıra numarası (1, 2, 3...) sağla
+    const pendingList = rows.filter(r => r.status === 'randevu' && (r.field_visit_status || 'bekliyor') === 'bekliyor');
+    const completedList = rows.filter(r => !(r.status === 'randevu' && (r.field_visit_status || 'bekliyor') === 'bekliyor'));
+
+    const districts = Array.from(new Set(rows.map(r => r.district).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr'));
+
+    res.json({
+      data: rows,
+      pending: pendingList,
+      completed: completedList,
+      districts,
+      stats: {
+        total: rows.length,
+        pending_count: pendingList.length,
+        completed_count: completedList.length
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Saha Rotası Sıralamasını Güncelle (Saha Personeli Gideceği Sıraya Göre Dizdiğinde)
+router.put('/field-route/reorder', async (req, res) => {
+  try {
+    const { ordered_ids } = req.body;
+    if (!Array.isArray(ordered_ids) || ordered_ids.length === 0) {
+      return res.status(400).json({ error: 'Sıralanacak işletme listesi boş.' });
+    }
+
+    const stmts = ordered_ids.map((id, idx) => ({
+      sql: 'UPDATE leads SET field_route_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      args: [idx + 1, Number(id)]
+    }));
+
+    for (let i = 0; i < stmts.length; i += 50) {
+      await db.batch(stmts.slice(i, i + 50), 'write');
+    }
+
+    invalidateCache();
+    res.json({
+      success: true,
+      message: 'Saha ziyaret rotası sıralaması kaydedildi.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Yönetici veya Çağrı Personeli Tarafından Saha Personeline İşletme Pasla (Tekli veya Toplu)
+router.post('/field-route/assign', async (req, res) => {
+  try {
+    const { lead_ids, field_member_id, visit_date, notes, assigned_by } = req.body;
+    const ids = Array.isArray(lead_ids) ? lead_ids.map(Number).filter(Boolean) : [];
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'Lütfen sahaya paslanacak en az bir işletme seçiniz.' });
+    }
+
+    const targetMember = await getDefaultFieldMember(field_member_id);
+    if (!targetMember) {
+      return res.status(400).json({ error: 'Atanacak saha personeli bulunamadı.' });
+    }
+
+    // Mevcut en yüksek sırayı bul ki yeni eklenenler listenin sonuna düzenli eklensin
+    const maxOrderRow = await db.get(
+      `SELECT MAX(CASE WHEN field_route_order < 9000 THEN field_route_order ELSE 0 END) as max_order 
+       FROM leads WHERE field_member_id = ? AND status = 'randevu'`,
+      targetMember.id
+    );
+    let nextOrder = (maxOrderRow?.max_order || 0) + 1;
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
+    const timeStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+    const author = (assigned_by || 'Yönetici').trim();
+
+    for (const id of ids) {
+      const lead = await db.get('SELECT id, name, call_notes, visit_date FROM leads WHERE id = ?', id);
+      if (!lead) continue;
+
+      let updatedNotes = lead.call_notes || '';
+      if (notes && notes.trim()) {
+        const formatted = `${author} [${dateStr} ${timeStr}] (Sahaya Paslandı): ${notes.trim()}`;
+        updatedNotes = updatedNotes ? `${updatedNotes.trim()}\n${formatted}` : formatted;
+        await db.run(
+          'INSERT INTO call_logs (lead_id, outcome, caller_name, notes) VALUES (?, ?, ?, ?)',
+          id, 'randevu', author, formatted
+        );
+      }
+
+      await db.run(
+        `UPDATE leads 
+         SET status = 'randevu',
+             field_member_id = ?,
+             field_member_name = ?,
+             field_visit_status = 'bekliyor',
+             field_route_order = ?,
+             visit_date = COALESCE(?, visit_date),
+             call_notes = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        targetMember.id,
+        targetMember.name,
+        nextOrder++,
+        visit_date || null,
+        updatedNotes || null,
+        id
+      );
+    }
+
+    // Saha personeline bildirim gönder
+    try {
+      const ph = ids.map(() => '?').join(',');
+      const assignedLeads = await db.all(`SELECT id, name, district FROM leads WHERE id IN (${ph})`, ...ids);
+      if (assignedLeads.length > 0) {
+        const count = assignedLeads.length;
+        const todayIso = new Date().toISOString().slice(0, 10);
+        let title = '🚗 Yeni Saha Ziyareti Paslandı';
+        let msg = '';
+        if (count === 1) {
+          const l = assignedLeads[0];
+          title = `🚗 Saha Ziyareti: ${l.name}`;
+          msg = `${author} size "${l.name}"${l.district ? ` (${l.district})` : ''} işletmesini saha ziyareti için pasladı.`;
+        } else {
+          title = `🚗 ${count} Yeni Saha Ziyareti Paslandı`;
+          msg = `${author} saha rotanıza "${assignedLeads[0].name}" dahil ${count} işletme ekledi.`;
+        }
+
+        await db.run(
+          `INSERT INTO notifications (to_user, title, message, date, time, read, type, count, lead_ids)
+           VALUES (?, ?, ?, ?, ?, 0, 'field_assignment', ?, ?)`,
+          targetMember.name,
+          title,
+          msg,
+          todayIso,
+          timeStr,
+          count,
+          assignedLeads.map(l => l.id).join(',')
+        );
+      }
+    } catch (notifErr) {
+      console.error('Saha bildirim hatası:', notifErr);
+    }
+
+    invalidateCache();
+    res.json({
+      success: true,
+      field_member: targetMember,
+      message: `${ids.length} işletme saha personeli ${targetMember.name} rotasına paslandı.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Tek işletme ve arama geçmişi (Paralel sorgular)
 router.get('/:id', async (req, res) => {
   try {
@@ -865,7 +1086,7 @@ router.get('/:id', async (req, res) => {
 // Arama sonucunu kaydet ve durumu güncelle (Diyagram akışı)
 router.post('/:id/call', async (req, res) => {
   try {
-    const { outcome, notes, caller_name, visit_date, recall_date, recall_time, score, retry_date, products } = req.body;
+    const { outcome, notes, caller_name, visit_date, recall_date, recall_time, score, retry_date, products, field_member_id } = req.body;
     const leadId = req.params.id;
 
     const lead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
@@ -882,6 +1103,19 @@ router.post('/:id/call', async (req, res) => {
 
     // Personel adını belirle ve notu "Sezai [12.10.2026 14:35]: ..." şeklinde sistem saatinden çekerek biçimlendir
     const author = (caller_name || 'Operatör').trim();
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('tr-TR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'Europe/Istanbul'
+    });
+    const timeStr = now.toLocaleTimeString('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Istanbul'
+    });
+
     let formattedNote = '';
     if (notes && notes.trim()) {
       let cleanNote = notes.trim();
@@ -892,20 +1126,6 @@ router.post('/:id/call', async (req, res) => {
       } else if (cleanNote.toLowerCase().startsWith(author.toLowerCase() + ':')) {
         cleanNote = cleanNote.substring(author.length + 1).trim();
       }
-
-      // Türkiye saat diliminde sistem tarihi ve saati
-      const now = new Date();
-      const dateStr = now.toLocaleDateString('tr-TR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        timeZone: 'Europe/Istanbul'
-      });
-      const timeStr = now.toLocaleTimeString('tr-TR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Europe/Istanbul'
-      });
 
       formattedNote = `${author} [${dateStr} ${timeStr}]: ${cleanNote}`;
     }
@@ -926,6 +1146,50 @@ router.post('/:id/call', async (req, res) => {
       }
     }
 
+    // EĞER SONUÇ 'randevu' (YÜZ YÜZE ZİYARET RANDEVUSU) İSE OTOMATİK SAHA PERSONELİNE PASLA
+    let assignedFieldId = lead.field_member_id || null;
+    let assignedFieldName = lead.field_member_name || null;
+    let assignedRouteOrder = lead.field_route_order || 9999;
+    let assignedVisitStatus = lead.field_visit_status || 'bekliyor';
+
+    if (outcome === 'randevu') {
+      const targetFieldMember = await getDefaultFieldMember(field_member_id);
+      if (targetFieldMember) {
+        assignedFieldId = targetFieldMember.id;
+        assignedFieldName = targetFieldMember.name;
+        assignedVisitStatus = 'bekliyor';
+
+        if (!lead.field_route_order || lead.field_route_order >= 9000) {
+          const maxOrderRow = await db.get(
+            `SELECT MAX(CASE WHEN field_route_order < 9000 THEN field_route_order ELSE 0 END) as max_order 
+             FROM leads WHERE field_member_id = ? AND status = 'randevu'`,
+            targetFieldMember.id
+          );
+          assignedRouteOrder = (maxOrderRow?.max_order || 0) + 1;
+        }
+
+        // Saha personeline anlık bildirim gönder
+        try {
+          const todayIso = new Date().toISOString().slice(0, 10);
+          const distText = lead.district ? ` (${lead.district})` : '';
+          await db.run(
+            `INSERT INTO notifications (to_user, title, message, date, time, read, type, count, lead_ids)
+             VALUES (?, ?, ?, ?, ?, 0, 'field_assignment', 1, ?)`,
+            targetFieldMember.name,
+            `🚗 Yeni Saha Ziyareti: ${lead.name}`,
+            `${author}, "${lead.name}"${distText} işletmesi için yüz yüze randevu aldı ve saha rotanıza pasladı.`,
+            todayIso,
+            timeStr,
+            String(lead.id)
+          );
+        } catch (notifErr) {
+          console.error('Saha randevu bildirimi hatası:', notifErr);
+        }
+      }
+    } else if (outcome === 'ziyaret_olumlu' || outcome === 'satis' || outcome === 'ziyaret_olumsuz') {
+      assignedVisitStatus = 'ziyaret_edildi';
+    }
+
     // Lead'i güncelle
     const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
 
@@ -940,6 +1204,10 @@ router.post('/:id/call', async (req, res) => {
         score = CASE WHEN ? IS NOT NULL THEN ? ELSE score END,
         retry_date = CASE WHEN ? IS NOT NULL THEN ? ELSE retry_date END,
         products = CASE WHEN ? IS NOT NULL THEN ? ELSE products END,
+        field_member_id = ?,
+        field_member_name = ?,
+        field_route_order = ?,
+        field_visit_status = ?,
         call_count = call_count + 1,
         last_called_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
@@ -953,13 +1221,125 @@ router.post('/:id/call', async (req, res) => {
       score !== undefined ? Number(score) : null, score !== undefined ? Number(score) : null,
       retry_date || null, retry_date || null,
       productsStr, productsStr,
+      assignedFieldId,
+      assignedFieldName,
+      assignedRouteOrder,
+      assignedVisitStatus,
       leadId
     );
 
     invalidateCache();
 
     const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
-    res.json({ success: true, lead: updatedLead, message: 'Arama kaydı ve durum güncellendi.' });
+    res.json({
+      success: true,
+      lead: updatedLead,
+      message: outcome === 'randevu' && assignedFieldName
+        ? `Randevu kaydedildi ve otomatik olarak saha personeli (${assignedFieldName}) rotasına paslandı.`
+        : 'Arama kaydı ve durum güncellendi.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Saha Personelinin Ziyaret Notu ve Sonucunu Kaydetmesi
+router.post('/:id/field-visit', async (req, res) => {
+  try {
+    const { outcome, notes, visitor_name, score, products, next_visit_date, recall_date, recall_time } = req.body;
+    const leadId = req.params.id;
+
+    const lead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
+    if (!lead) return res.status(404).json({ error: 'İşletme bulunamadı.' });
+
+    const author = (visitor_name || lead.field_member_name || 'Saha Personeli').trim();
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
+    const timeStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+
+    let newStatus = lead.status;
+    let newVisitStatus = 'ziyaret_edildi';
+    let logOutcome = 'ziyaret_notu';
+
+    if (outcome === 'satis' || outcome === 'ziyaret_olumlu') {
+      newStatus = 'satis_havuzu';
+      newVisitStatus = 'ziyaret_edildi';
+      logOutcome = 'ziyaret_olumlu';
+    } else if (outcome === 'tekrar_ziyaret') {
+      newStatus = 'randevu';
+      newVisitStatus = 'bekliyor';
+      logOutcome = 'randevu';
+    } else if (outcome === 'randevu_arama') {
+      newStatus = 'randevu_arama';
+      newVisitStatus = 'ziyaret_edildi';
+      logOutcome = 'randevu_arama';
+    } else if (outcome === 'ziyaret_olumsuz') {
+      newStatus = 'mutlak_olumsuz';
+      newVisitStatus = 'ziyaret_edildi';
+      logOutcome = 'ziyaret_olumsuz';
+    } else if (outcome === 'sadece_not') {
+      newStatus = lead.status;
+      newVisitStatus = lead.field_visit_status || 'bekliyor';
+      logOutcome = 'randevu';
+    }
+
+    let formattedNote = '';
+    if (notes && notes.trim()) {
+      formattedNote = `${author} (Saha) [${dateStr} ${timeStr}]: ${notes.trim()}`;
+    } else {
+      const labelMap = {
+        satis: 'Saha ziyareti olumlu tamamlandı, satış havuzuna aktarıldı.',
+        ziyaret_olumlu: 'Saha ziyareti olumlu tamamlandı, satış havuzuna aktarıldı.',
+        tekrar_ziyaret: 'Saha ziyareti yapıldı, tekrar ziyaret edilecek.',
+        randevu_arama: 'Saha ziyareti yapıldı, telefonla tekrar aranacak.',
+        ziyaret_olumsuz: 'Saha ziyareti olumsuz sonuçlandı.'
+      };
+      formattedNote = `${author} (Saha) [${dateStr} ${timeStr}]: ${labelMap[outcome] || 'Saha ziyareti gerçekleştirildi.'}`;
+    }
+
+    await db.run(
+      'INSERT INTO call_logs (lead_id, outcome, caller_name, notes) VALUES (?, ?, ?, ?)',
+      leadId, logOutcome, author, formattedNote
+    );
+
+    const newCallNotes = lead.call_notes && lead.call_notes.trim()
+      ? `${lead.call_notes.trim()}\n${formattedNote}`
+      : formattedNote;
+
+    const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
+
+    await db.run(
+      `UPDATE leads
+       SET status = ?,
+           call_notes = ?,
+           field_visit_status = ?,
+           visit_date = CASE WHEN ? IS NOT NULL THEN ? ELSE visit_date END,
+           recall_date = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_date END,
+           recall_time = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_time END,
+           score = CASE WHEN ? IS NOT NULL THEN ? ELSE score END,
+           products = CASE WHEN ? IS NOT NULL THEN ? ELSE products END,
+           call_count = call_count + 1,
+           last_called_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      newStatus,
+      newCallNotes,
+      newVisitStatus,
+      next_visit_date || null, next_visit_date || null,
+      recall_date || null, recall_date || null,
+      recall_time || null, recall_time || null,
+      score !== undefined ? Number(score) : null, score !== undefined ? Number(score) : null,
+      productsStr, productsStr,
+      leadId
+    );
+
+    invalidateCache();
+    const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
+    res.json({
+      success: true,
+      lead: updatedLead,
+      message: 'Saha ziyaret notu ve sonucu başarıyla kaydedildi.'
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
