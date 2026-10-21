@@ -159,30 +159,72 @@ router.post('/', async (req, res) => {
   }
 });
 
-// İş Durumunu veya Teslim Tarihini Güncelle
+// İş Bilgisini, Başlığını, Kategorisini, Alt Ürünlerini veya Teslim Tarihini Güncelle
 router.put('/:id', async (req, res) => {
   try {
-    const { status, due_date, notes, assigned_member_id, products } = req.body;
+    const { title, category_id, status, due_date, notes, assigned_member_id, products } = req.body;
     const jobId = req.params.id;
 
-    const productsStr = products !== undefined ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
+    const existing = await db.get('SELECT * FROM jobs WHERE id = ?', jobId);
+    if (!existing) {
+      return res.status(404).json({ error: 'İş bulunamadı.' });
+    }
+
+    const nextTitle = title !== undefined && String(title).trim() !== '' ? String(title).trim() : existing.title;
+    const nextCategoryId = category_id !== undefined && category_id !== null ? Number(category_id) : existing.category_id;
+    const nextStatus = status !== undefined && status !== null ? status : existing.status;
+    const nextDueDate = due_date !== undefined && due_date !== null ? due_date : existing.due_date;
+    const nextNotes = notes !== undefined ? notes : existing.notes;
+    const nextMemberId = assigned_member_id !== undefined ? (assigned_member_id ? Number(assigned_member_id) : null) : existing.assigned_member_id;
+    const nextProducts = products !== undefined
+      ? (typeof products === 'string' ? products : JSON.stringify(products))
+      : existing.products;
 
     const updateSql = `
       UPDATE jobs
       SET
-        status = COALESCE(?, status),
-        due_date = COALESCE(?, due_date),
-        notes = COALESCE(?, notes),
-        assigned_member_id = COALESCE(?, assigned_member_id),
-        products = CASE WHEN ? IS NOT NULL THEN ? ELSE products END,
+        title = ?,
+        category_id = ?,
+        status = ?,
+        due_date = ?,
+        notes = ?,
+        assigned_member_id = ?,
+        products = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
 
-    await db.run(updateSql, status || null, due_date || null, notes || null, assigned_member_id || null, productsStr, productsStr, jobId);
+    await db.run(
+      updateSql,
+      nextTitle,
+      nextCategoryId,
+      nextStatus,
+      nextDueDate,
+      nextNotes,
+      nextMemberId,
+      nextProducts,
+      jobId
+    );
 
-    const updated = await db.get('SELECT * FROM jobs WHERE id = ?', jobId);
-    res.json({ success: true, data: updated, message: 'İş güncellendi.' });
+    const updated = await db.get(`
+      SELECT
+        j.*,
+        l.name AS lead_name,
+        l.phone AS lead_phone,
+        l.district AS lead_district,
+        c.name AS category_name,
+        c.color AS category_color,
+        m.name AS member_name,
+        m.role AS member_role,
+        m.avatar_color AS member_color
+      FROM jobs j
+      JOIN leads l ON j.lead_id = l.id
+      LEFT JOIN categories c ON j.category_id = c.id
+      LEFT JOIN team_members m ON j.assigned_member_id = m.id
+      WHERE j.id = ?
+    `, jobId);
+
+    res.json({ success: true, data: updated, message: 'İş başarıyla güncellendi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

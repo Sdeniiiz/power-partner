@@ -15,6 +15,7 @@ import {
   Building2,
   Trash2,
   Search,
+  Pencil,
   X
 } from 'lucide-react';
 import { getLeads, getJobs, createJob, updateJob, deleteJob, getCategories, getTeamMembers, parseCallNote } from '../api';
@@ -55,6 +56,11 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
   const [businessSearchQuery, setBusinessSearchQuery] = useState('');
   const [searchedBusinesses, setSearchedBusinesses] = useState([]);
   const [searchingBusinesses, setSearchingBusinesses] = useState(false);
+
+  // Mevcut İşi Düzenleme Modalı
+  const [editingJob, setEditingJob] = useState(null);
+  const [customProductInput, setCustomProductInput] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const getDefaultDueDate = () => {
     const nextWeek = new Date();
@@ -276,6 +282,137 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
       if (onJobCreated) onJobCreated();
     } catch (err) {
       alert(`Hata: ${err.message}`);
+    }
+  };
+
+  // Mevcut bir işi düzenleme modalını aç
+  const openEditJobModal = (job) => {
+    let parsedProds = [];
+    try {
+      parsedProds = job.products ? JSON.parse(job.products) : [];
+    } catch {
+      parsedProds = [];
+    }
+    setCustomProductInput('');
+    setEditingJob({
+      id: job.id,
+      lead_id: job.lead_id,
+      lead_name: job.lead_name,
+      title: job.title || '',
+      category_id: Number(job.category_id) || categories[0]?.id || 1,
+      assigned_member_id: job.assigned_member_id || '',
+      due_date: job.due_date ? String(job.due_date).split('T')[0] : getDefaultDueDate(),
+      status: job.status || 'devam_ediyor',
+      products: Array.isArray(parsedProds) ? parsedProds : [],
+      notes: job.notes || '',
+      customTitleEdited: false
+    });
+  };
+
+  // Tablo üzerinden tek tıkla "Yelken Bayrak / Rollup" vb. bir alt hizmet etiketini kaldırma
+  const handleQuickRemoveProduct = async (job, prodToRemove) => {
+    let parsedProds = [];
+    try {
+      parsedProds = job.products ? JSON.parse(job.products) : [];
+    } catch {
+      parsedProds = [];
+    }
+    const nextProds = parsedProds.filter(p => p !== prodToRemove);
+    const cat = categories.find(c => c.id === Number(job.category_id));
+    const nextSuffix = nextProds.length > 0 ? nextProds.join(' + ') : (cat?.name || job.category_name || 'Hizmet');
+    const nextTitle = `${job.lead_name} - ${nextSuffix}`;
+
+    try {
+      await updateJob(job.id, {
+        products: nextProds,
+        title: nextTitle
+      });
+      setSuccessNotice(`"${prodToRemove}" etiketi kaldırıldı ve iş başlığı güncellendi.`);
+      loadData();
+      if (onJobCreated) onJobCreated();
+      setTimeout(() => setSuccessNotice(''), 3500);
+    } catch (err) {
+      alert(`Etiket kaldırılamadı: ${err.message}`);
+    }
+  };
+
+  const handleEditCategoryChange = (newCatId) => {
+    if (!editingJob) return;
+    const cat = categories.find(c => c.id === Number(newCatId));
+    const nextMemberId = cat?.default_member_id || editingJob.assigned_member_id;
+    const nextTitle = editingJob.customTitleEdited
+      ? editingJob.title
+      : `${editingJob.lead_name} - ${cat?.name || 'Hizmet'}`;
+
+    setEditingJob(prev => ({
+      ...prev,
+      category_id: Number(newCatId),
+      assigned_member_id: nextMemberId,
+      products: [],
+      title: nextTitle
+    }));
+  };
+
+  const toggleEditJobProduct = (prod) => {
+    if (!editingJob) return;
+    const exists = editingJob.products.includes(prod);
+    const nextProds = exists
+      ? editingJob.products.filter(p => p !== prod)
+      : [...editingJob.products, prod];
+
+    const cat = categories.find(c => c.id === Number(editingJob.category_id));
+    const autoSuffix = nextProds.length > 0 ? nextProds.join(' + ') : (cat?.name || 'Hizmet');
+    const nextTitle = editingJob.customTitleEdited
+      ? editingJob.title
+      : `${editingJob.lead_name} - ${autoSuffix}`;
+
+    setEditingJob(prev => ({
+      ...prev,
+      products: nextProds,
+      title: nextTitle
+    }));
+  };
+
+  const handleAddCustomProductToEdit = () => {
+    const clean = customProductInput.trim();
+    if (!clean || !editingJob) return;
+    if (!editingJob.products.includes(clean)) {
+      const nextProds = [...editingJob.products, clean];
+      const nextTitle = editingJob.customTitleEdited
+        ? editingJob.title
+        : `${editingJob.lead_name} - ${nextProds.join(' + ')}`;
+      setEditingJob(prev => ({
+        ...prev,
+        products: nextProds,
+        title: nextTitle
+      }));
+    }
+    setCustomProductInput('');
+  };
+
+  const handleSaveEditedJob = async (e) => {
+    e.preventDefault();
+    if (!editingJob) return;
+    setSavingEdit(true);
+    try {
+      await updateJob(editingJob.id, {
+        title: editingJob.title.trim(),
+        category_id: Number(editingJob.category_id),
+        assigned_member_id: editingJob.assigned_member_id ? Number(editingJob.assigned_member_id) : null,
+        due_date: editingJob.due_date,
+        status: editingJob.status,
+        products: editingJob.products,
+        notes: editingJob.notes
+      });
+      setSuccessNotice(`"${editingJob.title}" işi başarıyla güncellendi!`);
+      setEditingJob(null);
+      loadData();
+      if (onJobCreated) onJobCreated();
+      setTimeout(() => setSuccessNotice(''), 4000);
+    } catch (err) {
+      alert(`İş güncellenemedi: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -524,15 +661,31 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
                       <td className="p-3.5">
                         <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
                           <span>{job.title}</span>
+                          <button
+                            type="button"
+                            onClick={() => openEditJobModal(job)}
+                            className="text-slate-400 hover:text-indigo-600 p-0.5 rounded transition-colors cursor-pointer"
+                            title="İş Başlığını, Etiketlerini ve Detaylarını Düzenle"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                         {parsedProds.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {parsedProds.map(p => (
                               <span
                                 key={p}
-                                className="bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-extrabold px-2 py-0.2 rounded-md"
+                                className="bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-extrabold pl-2 pr-1 py-0.5 rounded-md inline-flex items-center gap-1"
                               >
-                                ✦ {p}
+                                <span>✦ {p}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickRemoveProduct(job, p)}
+                                  className="text-indigo-400 hover:text-rose-600 hover:bg-rose-50 rounded px-0.5 font-black cursor-pointer transition-colors"
+                                  title={`"${p}" etiketini bu işten kaldır`}
+                                >
+                                  ✕
+                                </button>
                               </span>
                             ))}
                           </div>
@@ -637,9 +790,19 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
                         </select>
                       </td>
 
-                      {/* Ek İş Ekle & Sil */}
+                      {/* Düzenle, Ek İş Ekle & Sil */}
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditJobModal(job)}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-extrabold text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                            title="Bu işin başlığını, alt hizmet etiketlerini (Yelken Bayrak, Rollup vb.), sorumlusunu veya tarihini düzenle"
+                          >
+                            <Pencil className="w-3 h-3 stroke-[2.5]" />
+                            <span>Düzenle</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() =>
@@ -1005,6 +1168,254 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MEVCUT İŞİ DÜZENLEME MODALI (BAŞLIK, KATEGORİ, ALT ETİKETLER VB.) */}
+      {/* ============================================================== */}
+      {editingJob && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 my-auto max-h-[92vh] overflow-y-auto">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider">
+                  Mevcut İşi & Etiketleri Düzenle
+                </span>
+                <h3 className="font-extrabold text-lg text-slate-900 mt-0.5">
+                  {editingJob.lead_name}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  İş başlığını, kategorisini, alt hizmet etiketlerini (Örn: Yelken Bayrak, Rollup, Web Sitesi vb.), sorumlu kişiyi ve teslim tarihini düzenleyebilirsiniz.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingJob(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedJob} className="mt-4 space-y-4">
+              {/* İş Başlığı */}
+              <div>
+                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                  İş / Proje Başlığı (Listede Gözükecek Ad):
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingJob.title}
+                  onChange={(e) =>
+                    setEditingJob(prev => ({
+                      ...prev,
+                      title: e.target.value,
+                      customTitleEdited: true
+                    }))
+                  }
+                  className="w-full text-xs bg-slate-50 focus:bg-white border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Hizmet Kategorisi */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                    Hizmet Kategorisi:
+                  </label>
+                  <select
+                    value={editingJob.category_id}
+                    onChange={(e) => handleEditCategoryChange(e.target.value)}
+                    className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900 cursor-pointer"
+                  >
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sorumlu Ekip Üyesi */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                    Sorumlu Ekip Üyesi:
+                  </label>
+                  <select
+                    value={editingJob.assigned_member_id}
+                    onChange={(e) =>
+                      setEditingJob(prev => ({
+                        ...prev,
+                        assigned_member_id: e.target.value
+                      }))
+                    }
+                    className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900 cursor-pointer"
+                  >
+                    {teamMembers.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — {m.role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Teslim Tarihi */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                    Teslim Tarihi (Deadline):
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={editingJob.due_date}
+                    onChange={(e) =>
+                      setEditingJob(prev => ({
+                        ...prev,
+                        due_date: e.target.value
+                      }))
+                    }
+                    className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900"
+                  />
+                </div>
+
+                {/* Durum */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                    İş Durumu:
+                  </label>
+                  <select
+                    value={editingJob.status}
+                    onChange={(e) =>
+                      setEditingJob(prev => ({
+                        ...prev,
+                        status: e.target.value
+                      }))
+                    }
+                    className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900 cursor-pointer"
+                  >
+                    <option value="devam_ediyor">Devam Ediyor</option>
+                    <option value="revizyonda">Revizyonda</option>
+                    <option value="tamamlandi">Tamamlandı</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Alt Hizmet / Ürün Paketleri Düzenleme */}
+              {(() => {
+                const editCat = categories.find(c => c.id === Number(editingJob.category_id));
+                const categoryProds = editCat?.name ? (CATEGORY_PRODUCTS[editCat.name] || []) : [];
+                // Mevcut seçili olup standart listede olmayan özel etiketleri de dahil et
+                const allDisplayedProds = Array.from(new Set([...categoryProds, ...(editingJob.products || [])]));
+
+                return (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between flex-wrap gap-1">
+                      <label className="text-xs font-extrabold text-slate-800">
+                        Alt Hizmet / Etiket Seçimi ({editingJob.products.length} seçili):
+                      </label>
+                      {editingJob.products.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const catName = editCat?.name || 'Hizmet';
+                            setEditingJob(prev => ({
+                              ...prev,
+                              products: [],
+                              title: prev.customTitleEdited ? prev.title : `${prev.lead_name} - ${catName}`
+                            }));
+                          }}
+                          className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                        >
+                          Tüm Etiketleri Temizle
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {allDisplayedProds.map(prod => {
+                        const checked = editingJob.products.includes(prod);
+                        return (
+                          <button
+                            key={prod}
+                            type="button"
+                            onClick={() => toggleEditJobProduct(prod)}
+                            className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
+                              checked
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            {checked ? '✓ ' : '+ '}{prod}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Özel Etiket / Hizmet Ekleme */}
+                    <div className="flex gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={customProductInput}
+                        onChange={(e) => setCustomProductInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddCustomProductToEdit();
+                          }
+                        }}
+                        placeholder="Özel alt hizmet / etiket yazıp ekleyin..."
+                        className="flex-1 text-xs bg-white border border-slate-300 rounded-xl px-3 py-1.5 font-medium"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCustomProductToEdit}
+                        className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer shrink-0"
+                      >
+                        + Etiket Ekle
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Proje Notları */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Proje Notları:
+                </label>
+                <textarea
+                  rows={2}
+                  value={editingJob.notes}
+                  onChange={(e) =>
+                    setEditingJob(prev => ({
+                      ...prev,
+                      notes: e.target.value
+                    }))
+                  }
+                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingJob(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                >
+                  İptal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black px-5 py-2.5 rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {savingEdit ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
