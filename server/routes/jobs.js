@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
@@ -51,19 +51,13 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Satış Havuzundan İş Dağıtımı Yap (Diyagram: Satış Havuzu -> İş Dağıtımı -> Kategori & Çalışan)
+// Satış Havuzundan İş Dağıtımı Yap (Tekli veya Çoklu Ayrı İş Oluşturma Desteği)
 router.post('/', async (req, res) => {
   try {
-    const { lead_id, category_id, assigned_member_id, title, due_date, notes, products } = req.body;
+    const { lead_id, category_id, assigned_member_id, title, due_date, notes, products, jobs_list, keep_in_pool } = req.body;
 
     if (!lead_id) {
       return res.status(400).json({ error: 'İşletme seçilmelidir.' });
-    }
-    if (!title) {
-      return res.status(400).json({ error: 'İş başlığı girilmelidir.' });
-    }
-    if (!due_date) {
-      return res.status(400).json({ error: 'Lütfen teslim tarihi belirleyiniz.' });
     }
 
     const lead = await db.get('SELECT * FROM leads WHERE id = ?', lead_id);
@@ -71,45 +65,94 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'İşletme bulunamadı.' });
     }
 
-    const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
-
-    // İşi oluştur
     const insertSql = `
       INSERT INTO jobs (lead_id, category_id, assigned_member_id, title, due_date, notes, products, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'devam_ediyor')
     `;
 
-    const result = await db.run(
-      insertSql,
-      lead_id,
-      category_id || null,
-      assigned_member_id || null,
-      title,
-      due_date,
-      notes || '',
-      productsStr
-    );
+    const createdIds = [];
 
-    // Müşteri adayının durumunu 'is_dagitildi' yap
-    await db.run(`
-      UPDATE leads
-      SET status = 'is_dagitildi', updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, lead_id);
+    // Eğer birden fazla ayrı iş (jobs_list) gönderildiyse her birini ayrı iş satırı olarak kaydet
+    if (Array.isArray(jobs_list) && jobs_list.length > 0) {
+      for (const item of jobs_list) {
+        const itemTitle = (item.title || `${lead.name} - Hizmet Paketi`).trim();
+        const itemDueDate = item.due_date || due_date;
+        if (!itemDueDate) {
+          return res.status(400).json({ error: `"${itemTitle}" için teslim tarihi belirlenmelidir.` });
+        }
+        const itemProductsStr = item.products
+          ? (typeof item.products === 'string' ? item.products : JSON.stringify(item.products))
+          : null;
 
-    const createdJob = await db.get(`
-      SELECT j.*, l.name as lead_name, c.name as category_name, m.name as member_name
-      FROM jobs j
-      JOIN leads l ON j.lead_id = l.id
-      LEFT JOIN categories c ON j.category_id = c.id
-      LEFT JOIN team_members m ON j.assigned_member_id = m.id
-      WHERE j.id = ?
-    `, result.lastInsertRowid);
+        const result = await db.run(
+          insertSql,
+          lead_id,
+          item.category_id || null,
+          item.assigned_member_id || assigned_member_id || null,
+          itemTitle,
+          itemDueDate,
+          item.notes !== undefined ? item.notes : (notes || ''),
+          itemProductsStr
+        );
+        if (result.lastInsertRowid) {
+          createdIds.push(result.lastInsertRowid);
+        }
+      }
+    } else {
+      if (!title) {
+        return res.status(400).json({ error: 'İş başlığı girilmelidir.' });
+      }
+      if (!due_date) {
+        return res.status(400).json({ error: 'Lütfen teslim tarihi belirleyiniz.' });
+      }
+
+      const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
+
+      const result = await db.run(
+        insertSql,
+        lead_id,
+        category_id || null,
+        assigned_member_id || null,
+        title,
+        due_date,
+        notes || '',
+        productsStr
+      );
+      if (result.lastInsertRowid) {
+        createdIds.push(result.lastInsertRowid);
+      }
+    }
+
+    // Müşteri adayının durumunu (eğer havuzda tut seçeneği işaretlenmediyse) 'is_dagitildi' yap
+    if (!keep_in_pool) {
+      await db.run(`
+        UPDATE leads
+        SET status = 'is_dagitildi', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, lead_id);
+    }
+
+    const placeholders = createdIds.map(() => '?').join(',');
+    const createdJobs = createdIds.length > 0
+      ? await db.all(`
+          SELECT j.*, l.name as lead_name, c.name as category_name, m.name as member_name
+          FROM jobs j
+          JOIN leads l ON j.lead_id = l.id
+          LEFT JOIN categories c ON j.category_id = c.id
+          LEFT JOIN team_members m ON j.assigned_member_id = m.id
+          WHERE j.id IN (${placeholders})
+          ORDER BY j.id ASC
+        `, ...createdIds)
+      : [];
 
     res.json({
       success: true,
-      data: createdJob,
-      message: 'İş başarıyla oluşturuldu ve ekip üyesine atandı.'
+      data: createdJobs[0] || null,
+      jobs: createdJobs,
+      count: createdJobs.length,
+      message: createdJobs.length > 1
+        ? `${createdJobs.length} ayrı iş başarıyla oluşturuldu ve ilgili ekip üyelerine atandı.`
+        : 'İş başarıyla oluşturuldu ve ekip üyesine atandı.'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
