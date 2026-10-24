@@ -191,6 +191,16 @@ export default function App() {
           <CalendarView />
         )}
 
+        {/* ADMİN ÖZEL: TAMAMLANAN İŞLER, MALİYET, FİNANS & HİZMET FİYAT KATALOĞU */}
+        {activeTab === 'finance' && isAdmin && (
+          <SalesPool
+            currentUser={currentUser}
+            authUser={authUser}
+            onJobCreated={refreshGlobalData}
+            onlyFinanceView={true}
+          />
+        )}
+
       </main>
 
       {/* Bugün Aranacak Randevular & Hatırlatmalar Modalı */}

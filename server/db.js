@@ -163,6 +163,12 @@ async function initDb() {
         status TEXT DEFAULT 'devam_ediyor',
         due_date TEXT,
         notes TEXT,
+        sale_price REAL DEFAULT 0,
+        cost REAL DEFAULT 0,
+        payment_method TEXT DEFAULT 'Havale / EFT',
+        installment_count INTEGER DEFAULT 1,
+        paid_amount REAL DEFAULT 0,
+        completed_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(lead_id) REFERENCES leads(id),
@@ -170,6 +176,74 @@ async function initDb() {
         FOREIGN KEY(assigned_member_id) REFERENCES team_members(id)
       );
     `);
+
+    // İşler (jobs) tablosu için finansal kolon göçleri
+    const jobColumnsToAdd = [
+      { name: 'sale_price', type: 'REAL DEFAULT 0' },
+      { name: 'cost', type: 'REAL DEFAULT 0' },
+      { name: 'payment_method', type: "TEXT DEFAULT 'Havale / EFT'" },
+      { name: 'installment_count', type: 'INTEGER DEFAULT 1' },
+      { name: 'paid_amount', type: 'REAL DEFAULT 0' },
+      { name: 'completed_at', type: 'DATETIME' }
+    ];
+
+    await Promise.all(
+      jobColumnsToAdd.map(col =>
+        client.execute(`ALTER TABLE jobs ADD COLUMN ${col.name} ${col.type}`).catch(() => {})
+      )
+    );
+
+    // Ürün / Hizmet Satış Fiyatı ve Maliyet Kataloğu Tablosu (Admin için)
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS service_pricing (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_name TEXT NOT NULL,
+        service_name TEXT NOT NULL UNIQUE,
+        sale_price REAL DEFAULT 0,
+        cost REAL DEFAULT 0,
+        description TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Varsayılan Hizmet / Ürün Kalemlerini Kataloğa Ekle (Varsa atlar)
+    const defaultServiceCatalog = [
+      { category_name: 'Sosyal Medya', service_name: 'Sosyal Medya (Genel Paket)' },
+      { category_name: 'Sosyal Medya', service_name: 'Sosyal Medya İçerik Yönetimi' },
+      { category_name: 'Sosyal Medya', service_name: 'Meta (Instagram/FB) Reklamları' },
+      { category_name: 'Sosyal Medya', service_name: 'Reels / Video Çekimi' },
+      { category_name: 'Sosyal Medya', service_name: 'Hikaye Tasarımları' },
+      { category_name: 'Sosyal Medya', service_name: 'Topluluk Yönetimi' },
+      { category_name: 'Web Hizmetleri', service_name: 'Web Hizmetleri (Genel Paket)' },
+      { category_name: 'Web Hizmetleri', service_name: 'Web Sitesi Tasarımı' },
+      { category_name: 'Web Hizmetleri', service_name: 'E-Ticaret Sitesi' },
+      { category_name: 'Web Hizmetleri', service_name: 'SEO Çalışması' },
+      { category_name: 'Web Hizmetleri', service_name: 'Kurumsal E-Posta Kurulumu' },
+      { category_name: 'Web Hizmetleri', service_name: 'Hosting & Bakım' },
+      { category_name: 'QR Menü', service_name: 'QR Menü (Genel Paket)' },
+      { category_name: 'QR Menü', service_name: 'QR Menü Kurulumu' },
+      { category_name: 'QR Menü', service_name: 'Self-Order Entegrasyonu' },
+      { category_name: 'QR Menü', service_name: 'Menü Fotoğraf Çekimi' },
+      { category_name: 'QR Menü', service_name: 'Masa Standı & QR Kod Baskısı' },
+      { category_name: 'Fiziki Baskı', service_name: 'Fiziki Baskı (Genel Paket)' },
+      { category_name: 'Fiziki Baskı', service_name: 'Işıklı/Işıksız Tabela' },
+      { category_name: 'Fiziki Baskı', service_name: 'Kartvizit Baskısı' },
+      { category_name: 'Fiziki Baskı', service_name: 'Broşür & El İlanı' },
+      { category_name: 'Fiziki Baskı', service_name: 'Yelken Bayrak / Rollup' },
+      { category_name: 'Fiziki Baskı', service_name: 'Ambalaj & Poşet Tasarımı' },
+      { category_name: 'Influencer Marketing', service_name: 'Influencer İşbirliği Kampanyası' },
+      { category_name: 'Influencer Marketing', service_name: 'Blogger Daveti' },
+      { category_name: 'Influencer Marketing', service_name: 'Mikro-Influencer Ziyaretleri' },
+      { category_name: 'Powercoffee', service_name: 'Powercoffee Bayilik / Konsept' },
+      { category_name: 'Powercoffee', service_name: 'Kurumsal Kahve Tedariği' }
+    ];
+
+    for (const item of defaultServiceCatalog) {
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO service_pricing (category_name, service_name, sale_price, cost) VALUES (?, ?, 0, 0)`,
+        args: [item.category_name, item.service_name]
+      }).catch(() => {});
+    }
 
     await client.execute(`
       CREATE TABLE IF NOT EXISTS call_logs (

@@ -46,7 +46,12 @@ export const deleteCampaign = (data) => api.delete('/leads/campaigns/delete', { 
 export const getJobs = (params) => api.get('/jobs', { params }).then(res => res.data);
 export const createJob = (data) => api.post('/jobs', data).then(res => res.data);
 export const updateJob = (id, data) => api.put(`/jobs/${id}`, data).then(res => res.data);
-export const deleteJob = (id) => api.delete(`/jobs/${id}`).then(res => res.data);
+export const deleteJob = (id, data) => api.delete(`/jobs/${id}`, { data }).then(res => res.data);
+
+export const getServicePricing = () => api.get('/jobs/pricing').then(res => res.data);
+export const saveServicePricing = (data) => api.post('/jobs/pricing', data).then(res => res.data);
+export const updateServicePricing = (id, data) => api.put(`/jobs/pricing/${id}`, data).then(res => res.data);
+export const deleteServicePricing = (id) => api.delete(`/jobs/pricing/${id}`).then(res => res.data);
 
 export const getTeamMembers = () => api.get('/team/members').then(res => res.data);
 export const addTeamMember = (data) => api.post('/team/members', data).then(res => res.data);

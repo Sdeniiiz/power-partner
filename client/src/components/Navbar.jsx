@@ -308,6 +308,19 @@ export default function Navbar({
               <Calendar className="w-4 h-4 text-amber-600" />
               <span>5. Takvim</span>
             </button>
+
+            {isAdmin && (
+              <button
+                onClick={() => setActiveTab('finance')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all ${
+                  activeTab === 'finance'
+                    ? 'bg-slate-900 text-emerald-300 shadow-xs'
+                    : 'text-emerald-900 bg-emerald-50/90 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+              >
+                <span>💰 Finans & Fiyatlar</span>
+              </button>
+            )}
           </nav>
 
           {/* Sağ Alan: Aktif Kullanıcı & Ayarlar & Çıkış */}
@@ -632,6 +645,18 @@ export default function Navbar({
           >
             5. Takvim
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('finance')}
+              className={`flex-shrink-0 text-xs px-2.5 py-1.5 rounded-lg font-extrabold transition-colors ${
+                activeTab === 'finance'
+                  ? 'bg-slate-900 text-emerald-300 shadow-xs'
+                  : 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+              }`}
+            >
+              💰 Finans & Fiyatlar
+            </button>
+          )}
         </div>
 
         {/* Mobilde SABİT (Pinned) Çıkış Butonu - Asla Kayıp Olmaz */}

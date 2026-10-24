@@ -19,6 +19,7 @@ import {
   X
 } from 'lucide-react';
 import { getLeads, getJobs, createJob, updateJob, deleteJob, getCategories, getTeamMembers, parseCallNote } from '../api';
+import AdminCompletedFinanceSection from './AdminCompletedFinanceSection';
 
 // Kategori bazlı ürün/hizmet paketleri
 const CATEGORY_PRODUCTS = {
@@ -30,7 +31,7 @@ const CATEGORY_PRODUCTS = {
   'Fiziki Baskı': ['Kartvizit Baskısı', 'Broşür & El İlanı', 'Işıklı/Işıksız Tabela', 'Yelken Bayrak / Rollup', 'Ambalaj & Poşet Tasarımı']
 };
 
-export default function SalesPool({ currentUser, authUser, onJobCreated }) {
+export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFinanceView = false }) {
   const isAdmin = authUser?.role === 'admin';
   const [salesLeads, setSalesLeads] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -267,6 +268,14 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
   const handleUpdateStatus = async (jobId, newStatus) => {
     try {
       await updateJob(jobId, { status: newStatus });
+      if (newStatus === 'tamamlandi') {
+        setSuccessNotice(
+          isAdmin
+            ? 'İş "Tamamlandı" olarak işaretlendi ve alttaki Tamamlanan İşler & Finans bölümüne taşındı.'
+            : 'İş "Tamamlandı" olarak işaretlendi ve yönetici onay/finans ekranına aktarıldı.'
+        );
+        setTimeout(() => setSuccessNotice(''), 4000);
+      }
       loadData();
       if (onJobCreated) onJobCreated();
     } catch (err) {
@@ -439,9 +448,15 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
     return acc;
   }, {});
 
+  // Devam eden (aktif) işler ve tamamlanan işler ayrımı
+  const activeJobs = jobs.filter(j => j.status !== 'tamamlandi');
+  const completedJobs = jobs.filter(j => j.status === 'tamamlandi');
+  const completedJobsCount = completedJobs.length;
+
   return (
     <div className="space-y-6">
-      
+      {!onlyFinanceView && (
+        <>
       {/* Üst Banner */}
       <div className="bg-gradient-to-r from-purple-700 via-indigo-700 to-slate-800 rounded-2xl p-6 text-white shadow-lg">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -564,18 +579,23 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
         )}
       </div>
 
-      {/* 2. KISIM: ALINAN VE DEVAM EDEN İŞLER (HER İŞ AYRI SATIRDA GÖSTERİLİR) */}
+      {/* 2. KISIM: ALINAN VE DEVAM EDEN İŞLER (YALNIZCA AKTİF / DEVAM EDEN İŞLER GÖSTERİLİR) */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         
         {/* Filtreleme Başlığı */}
         <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div>
-            <h2 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+            <h2 className="font-extrabold text-base text-slate-900 flex items-center gap-2 flex-wrap">
               <Layers className="w-4 h-4 text-blue-600" />
-              <span>Alınan ve Devam Eden İşler ({jobs.length} Ayrı İş)</span>
+              <span>Alınan ve Devam Eden İşler ({activeJobs.length} Aktif İş)</span>
+              {completedJobsCount > 0 && (
+                <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-black px-2.5 py-0.5 rounded-full">
+                  ✓ {completedJobsCount} Tamamlanan İş Altta Listeleniyor
+                </span>
+              )}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Aynı işletmeden alınan her hizmet (Örn: Web Sitesi ve Sosyal Medya) ayrı birer iş satırı olarak takip edilir
+              Aynı işletmeden alınan her hizmet ayrı birer iş satırı olarak takip edilir. "Tamamlandı" olarak işaretlenen işler alttaki Tamamlanan İşler bölümüne aktarılır.
             </p>
           </div>
 
@@ -626,14 +646,14 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/70 font-medium">
-              {jobs.length === 0 ? (
+              {activeJobs.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-400">
-                    Seçili filtrelere uygun iş bulunamadı.
+                    Seçili filtrelere uygun devam eden aktif iş bulunamadı.
                   </td>
                 </tr>
               ) : (
-                jobs.map((job) => {
+                activeJobs.map((job) => {
                   const isCompleted = job.status === 'tamamlandi';
                   const isRevision = job.status === 'revizyonda';
                   
@@ -841,6 +861,188 @@ export default function SalesPool({ currentUser, authUser, onJobCreated }) {
         </div>
 
       </div>
+        </>
+      )}
+
+      {/* 3. KISIM A (YALNIZCA ADMİN): TAMAMLANAN İŞLER, MALİYET, ÖDEME TAKİBİ VE FİYAT KATALOĞU */}
+      {isAdmin && (
+        <AdminCompletedFinanceSection
+          jobs={jobs}
+          categories={categories}
+          standalone={onlyFinanceView}
+          onJobsChanged={() => {
+            loadData();
+            if (onJobCreated) onJobCreated();
+          }}
+          onOpenEditJob={openEditJobModal}
+        />
+      )}
+
+      {/* 3. KISIM B (PERSONEL İÇİN): TAMAMLANAN İŞLER (FİYAT VE MALİYET BİLGİSİ GÖSTERİLMEZ, DEVAM EDEN İŞLERLE AYNI GÖRÜNÜM) */}
+      {!isAdmin && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden mt-6">
+          <div className="p-4 sm:p-5 border-b border-slate-200 bg-emerald-50/40 flex items-center justify-between">
+            <div>
+              <h2 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>Tamamlanan İşler ({completedJobs.length})</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Başarıyla teslim edilen ve tamamlanan işlerin listesi
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-100/75 text-slate-600 uppercase font-bold border-b border-slate-200 tracking-wider">
+                <tr>
+                  <th className="p-3.5">Tamamlanan İş / Hizmet Başlığı</th>
+                  <th className="p-3.5">Müşteri İşletme</th>
+                  <th className="p-3.5">Hizmet Kategorisi</th>
+                  <th className="p-3.5">Sorumlu Kişi</th>
+                  <th className="p-3.5">Teslim Tarihi</th>
+                  <th className="p-3.5">Durum</th>
+                  <th className="p-3.5 text-right">İşlem</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/70 font-medium">
+                {completedJobs.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-slate-400">
+                      Henüz tamamlanan iş bulunmuyor.
+                    </td>
+                  </tr>
+                ) : (
+                  completedJobs.map((job) => {
+                    let parsedProds = [];
+                    try {
+                      parsedProds = job.products ? JSON.parse(job.products) : [];
+                    } catch {
+                      parsedProds = [];
+                    }
+                    const totalJobsForThisLead = jobCountByLeadId[job.lead_id] || 1;
+
+                    return (
+                      <tr key={job.id} className="hover:bg-slate-50 transition-colors bg-emerald-50/10">
+                        {/* İş Başlığı ve Rozetler */}
+                        <td className="p-3.5">
+                          <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
+                            <span>{job.title}</span>
+                          </div>
+                          {parsedProds.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {parsedProds.map(p => (
+                                <span
+                                  key={p}
+                                  className="bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-extrabold px-2 py-0.2 rounded-md"
+                                >
+                                  ✦ {p}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {job.notes && (
+                            <div className="text-slate-500 text-[11px] truncate max-w-xs mt-1" title={job.notes}>
+                              {job.notes}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Müşteri */}
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-extrabold text-slate-800">
+                              {job.lead_name}
+                            </span>
+                            {totalJobsForThisLead > 1 && (
+                              <span className="bg-purple-100 text-purple-800 border border-purple-200 text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                                {totalJobsForThisLead} Ayrı İş
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-slate-400 text-[11px]">
+                            {job.lead_district} • {job.lead_phone}
+                          </div>
+                        </td>
+
+                        {/* Hizmet Kategorisi */}
+                        <td className="p-3.5">
+                          <span
+                            className="inline-block text-[11px] font-bold px-2.5 py-1 rounded-lg text-white shadow-2xs"
+                            style={{ backgroundColor: job.category_color || '#6366f1' }}
+                          >
+                            {job.category_name || 'Genel Hizmet'}
+                          </span>
+                        </td>
+
+                        {/* Sorumlu Kişi */}
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-6 h-6 rounded-full text-white text-[10px] font-bold flex items-center justify-center shadow-2xs shrink-0"
+                              style={{ backgroundColor: job.member_color || '#2563eb' }}
+                            >
+                              {job.member_name ? job.member_name.slice(0, 2).toUpperCase() : '?'}
+                            </div>
+                            <div>
+                              <div className="font-bold text-slate-900">
+                                {job.member_name || 'Atanmadı'}
+                              </div>
+                              <div className="text-slate-400 text-[10px]">
+                                {job.member_role?.split('&')[0]}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Teslim Tarihi */}
+                        <td className="p-3.5">
+                          <div className="font-bold text-slate-800 flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{new Date(job.due_date).toLocaleDateString('tr-TR')}</span>
+                          </div>
+                          <span className="text-emerald-700 text-[10px] font-bold bg-emerald-50 px-1.5 py-0.5 rounded-sm inline-block mt-0.5">
+                            ✓ Tamamlandı
+                          </span>
+                        </td>
+
+                        {/* Durum */}
+                        <td className="p-3.5">
+                          <span className="bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold px-2.5 py-1 rounded-lg inline-block">
+                            Tamamlandı
+                          </span>
+                        </td>
+
+                        {/* Ek İş Ekle */}
+                        <td className="p-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDistributeModal({
+                                id: job.lead_id,
+                                name: job.lead_name,
+                                district: job.lead_district,
+                                phone: job.lead_phone,
+                                notes: job.notes
+                              })
+                            }
+                            className="bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-extrabold text-[11px] px-2.5 py-1 rounded-lg inline-flex items-center gap-1 transition-colors cursor-pointer"
+                            title={`${job.lead_name} işletmesi için yeni/ek bir iş daha ekle`}
+                          >
+                            <Plus className="w-3 h-3 stroke-[2.5]" />
+                            <span>Ek İş Ekle</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ============================================================== */}
       {/* ÇOKLU / AYRI AYRI İŞ DAĞITIMI MODALI */}

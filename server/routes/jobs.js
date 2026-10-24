@@ -2,6 +2,223 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
+// Seçilen kategori ve alt ürünlere göre katalogdan (service_pricing) varsayılan satış fiyatı ve maliyet hesapla
+async function resolveDefaultPricing(categoryId, productsInput) {
+  try {
+    let prodList = [];
+    if (Array.isArray(productsInput)) {
+      prodList = productsInput;
+    } else if (typeof productsInput === 'string' && productsInput.trim()) {
+      try {
+        prodList = JSON.parse(productsInput);
+      } catch {
+        prodList = [];
+      }
+    }
+
+    const allPricing = await db.all('SELECT * FROM service_pricing');
+    if (!allPricing || allPricing.length === 0) {
+      return { sale_price: 0, cost: 0 };
+    }
+
+    // 1. Önce seçili alt ürünler (products) varsa onların katalog fiyat/maliyet toplamına bak
+    if (Array.isArray(prodList) && prodList.length > 0) {
+      let totalSale = 0;
+      let totalCost = 0;
+      let matchedAny = false;
+
+      for (const prodName of prodList) {
+        const match = allPricing.find(
+          p => String(p.service_name).toLowerCase() === String(prodName).trim().toLowerCase()
+        );
+        if (match && (Number(match.sale_price) > 0 || Number(match.cost) > 0)) {
+          totalSale += Number(match.sale_price) || 0;
+          totalCost += Number(match.cost) || 0;
+          matchedAny = true;
+        }
+      }
+
+      if (matchedAny) {
+        return { sale_price: totalSale, cost: totalCost };
+      }
+    }
+
+    // 2. Alt ürün eşleşmediyse veya seçilmediyse kategori adına göre genel paket fiyatına bak
+    if (categoryId) {
+      const cat = await db.get('SELECT name FROM categories WHERE id = ?', categoryId);
+      if (cat && cat.name) {
+        const catNameLower = String(cat.name).toLowerCase();
+        const exactCatMatch = allPricing.find(
+          p =>
+            String(p.service_name).toLowerCase() === `${catNameLower} (genel paket)` ||
+            String(p.service_name).toLowerCase() === catNameLower ||
+            (String(p.category_name).toLowerCase() === catNameLower &&
+              (Number(p.sale_price) > 0 || Number(p.cost) > 0))
+        );
+        if (exactCatMatch) {
+          return {
+            sale_price: Number(exactCatMatch.sale_price) || 0,
+            cost: Number(exactCatMatch.cost) || 0
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Varsayılan fiyat hesaplanamadı:', err.message);
+  }
+  return { sale_price: 0, cost: 0 };
+}
+
+// ============================================================================
+// ÜRÜN / HİZMET SATIŞ FİYATI & MALİYET KATALOĞU (ADMİN FİYATLANDIRMA PANELİ)
+// ============================================================================
+router.get('/pricing', async (req, res) => {
+  try {
+    const items = await db.all('SELECT * FROM service_pricing ORDER BY category_name ASC, id ASC');
+    res.json({ data: items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/pricing', async (req, res) => {
+  try {
+    const { category_name, service_name, sale_price, cost, description } = req.body;
+    if (!service_name || !String(service_name).trim()) {
+      return res.status(400).json({ error: 'Ürün / Hizmet adı girilmelidir.' });
+    }
+    const cleanService = String(service_name).trim();
+    const cleanCat = String(category_name || 'Genel Hizmet').trim();
+    const numSale = Number(sale_price) || 0;
+    const numCost = Number(cost) || 0;
+
+    const existing = await db.get(
+      'SELECT * FROM service_pricing WHERE LOWER(service_name) = LOWER(?)',
+      cleanService
+    );
+
+    if (existing) {
+      await db.run(
+        `UPDATE service_pricing
+         SET category_name = ?, sale_price = ?, cost = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        cleanCat,
+        numSale,
+        numCost,
+        description || existing.description || null,
+        existing.id
+      );
+      const updated = await db.get('SELECT * FROM service_pricing WHERE id = ?', existing.id);
+      return res.json({ success: true, data: updated, message: 'Hizmet fiyatı ve maliyeti güncellendi.' });
+    }
+
+    const result = await db.run(
+      `INSERT INTO service_pricing (category_name, service_name, sale_price, cost, description)
+       VALUES (?, ?, ?, ?, ?)`,
+      cleanCat,
+      cleanService,
+      numSale,
+      numCost,
+      description || null
+    );
+    const created = await db.get('SELECT * FROM service_pricing WHERE id = ?', result.lastInsertRowid);
+    res.json({ success: true, data: created, message: 'Yeni hizmet/ürün fiyat kataloğuna eklendi.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/pricing/:id', async (req, res) => {
+  try {
+    const { category_name, service_name, sale_price, cost, description, apply_to_existing } = req.body;
+    const id = req.params.id;
+
+    const existing = await db.get('SELECT * FROM service_pricing WHERE id = ?', id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Katalog kalemi bulunamadı.' });
+    }
+
+    const nextCat = category_name !== undefined ? String(category_name).trim() : existing.category_name;
+    const nextService = service_name !== undefined ? String(service_name).trim() : existing.service_name;
+    const nextSale = sale_price !== undefined ? Number(sale_price) || 0 : Number(existing.sale_price) || 0;
+    const nextCost = cost !== undefined ? Number(cost) || 0 : Number(existing.cost) || 0;
+    const nextDesc = description !== undefined ? description : existing.description;
+
+    await db.run(
+      `UPDATE service_pricing
+       SET category_name = ?, service_name = ?, sale_price = ?, cost = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      nextCat,
+      nextService,
+      nextSale,
+      nextCost,
+      nextDesc,
+      id
+    );
+
+    // Eğer "Mevcut İşlere de Uygula" (veya fiyatı 0 olan eşleşen işlere uygula) istendiyse:
+    let updatedJobsCount = 0;
+    if (apply_to_existing) {
+      const allJobs = await db.all(`
+        SELECT j.*, c.name AS category_name
+        FROM jobs j
+        LEFT JOIN categories c ON j.category_id = c.id
+      `);
+
+      for (const job of allJobs) {
+        let prods = [];
+        try {
+          prods = job.products ? JSON.parse(job.products) : [];
+        } catch {
+          prods = [];
+        }
+        const serviceLower = nextService.toLowerCase();
+        const catLower = nextCat.toLowerCase();
+        const isGeneralCatItem =
+          serviceLower === `${catLower} (genel paket)` || serviceLower === catLower;
+
+        const matchesProduct = Array.isArray(prods) && prods.some(p => String(p).toLowerCase() === serviceLower);
+        const matchesGeneralCategory =
+          isGeneralCatItem &&
+          String(job.category_name || '').toLowerCase() === catLower &&
+          (!Array.isArray(prods) || prods.length === 0);
+
+        if (matchesProduct || matchesGeneralCategory) {
+          await db.run(
+            'UPDATE jobs SET sale_price = ?, cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            nextSale,
+            nextCost,
+            job.id
+          );
+          updatedJobsCount++;
+        }
+      }
+    }
+
+    const updated = await db.get('SELECT * FROM service_pricing WHERE id = ?', id);
+    res.json({
+      success: true,
+      data: updated,
+      updated_jobs_count: updatedJobsCount,
+      message:
+        updatedJobsCount > 0
+          ? `"${nextService}" fiyatı güncellendi ve eşleşen ${updatedJobsCount} işe uygulandı.`
+          : `"${nextService}" satış fiyatı ve maliyeti güncellendi.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/pricing/:id', async (req, res) => {
+  try {
+    await db.run('DELETE FROM service_pricing WHERE id = ?', req.params.id);
+    res.json({ success: true, message: 'Hizmet fiyat kalemi silindi.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Tüm işleri listele (Kategori, Çalışan ve İşletme bilgileriyle birlikte)
 router.get('/', async (req, res) => {
   try {
@@ -54,7 +271,22 @@ router.get('/', async (req, res) => {
 // Satış Havuzundan İş Dağıtımı Yap (Tekli veya Çoklu Ayrı İş Oluşturma Desteği)
 router.post('/', async (req, res) => {
   try {
-    const { lead_id, category_id, assigned_member_id, title, due_date, notes, products, jobs_list, keep_in_pool } = req.body;
+    const {
+      lead_id,
+      category_id,
+      assigned_member_id,
+      title,
+      due_date,
+      notes,
+      products,
+      jobs_list,
+      keep_in_pool,
+      sale_price,
+      cost,
+      payment_method,
+      installment_count,
+      paid_amount
+    } = req.body;
 
     if (!lead_id) {
       return res.status(400).json({ error: 'İşletme seçilmelidir.' });
@@ -66,8 +298,11 @@ router.post('/', async (req, res) => {
     }
 
     const insertSql = `
-      INSERT INTO jobs (lead_id, category_id, assigned_member_id, title, due_date, notes, products, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'devam_ediyor')
+      INSERT INTO jobs (
+        lead_id, category_id, assigned_member_id, title, due_date, notes, products, status,
+        sale_price, cost, payment_method, installment_count, paid_amount
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'devam_ediyor', ?, ?, ?, ?, ?)
     `;
 
     const createdIds = [];
@@ -84,6 +319,16 @@ router.post('/', async (req, res) => {
           ? (typeof item.products === 'string' ? item.products : JSON.stringify(item.products))
           : null;
 
+        const catalogDefaults = await resolveDefaultPricing(item.category_id, item.products);
+        const itemSalePrice =
+          item.sale_price !== undefined && item.sale_price !== ''
+            ? Number(item.sale_price) || 0
+            : catalogDefaults.sale_price;
+        const itemCost =
+          item.cost !== undefined && item.cost !== ''
+            ? Number(item.cost) || 0
+            : catalogDefaults.cost;
+
         const result = await db.run(
           insertSql,
           lead_id,
@@ -92,7 +337,12 @@ router.post('/', async (req, res) => {
           itemTitle,
           itemDueDate,
           item.notes !== undefined ? item.notes : (notes || ''),
-          itemProductsStr
+          itemProductsStr,
+          itemSalePrice,
+          itemCost,
+          item.payment_method || 'Havale / EFT',
+          Number(item.installment_count) || 1,
+          Number(item.paid_amount) || 0
         );
         if (result.lastInsertRowid) {
           createdIds.push(result.lastInsertRowid);
@@ -107,6 +357,11 @@ router.post('/', async (req, res) => {
       }
 
       const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
+      const catalogDefaults = await resolveDefaultPricing(category_id, products);
+      const finalSalePrice =
+        sale_price !== undefined && sale_price !== '' ? Number(sale_price) || 0 : catalogDefaults.sale_price;
+      const finalCost =
+        cost !== undefined && cost !== '' ? Number(cost) || 0 : catalogDefaults.cost;
 
       const result = await db.run(
         insertSql,
@@ -116,7 +371,12 @@ router.post('/', async (req, res) => {
         title,
         due_date,
         notes || '',
-        productsStr
+        productsStr,
+        finalSalePrice,
+        finalCost,
+        payment_method || 'Havale / EFT',
+        Number(installment_count) || 1,
+        Number(paid_amount) || 0
       );
       if (result.lastInsertRowid) {
         createdIds.push(result.lastInsertRowid);
@@ -159,10 +419,23 @@ router.post('/', async (req, res) => {
   }
 });
 
-// İş Bilgisini, Başlığını, Kategorisini, Alt Ürünlerini veya Teslim Tarihini Güncelle
+// İş Bilgisini, Başlığını, Kategorisini, Alt Ürünlerini, Teslim Tarihini veya Finansal Bilgilerini Güncelle
 router.put('/:id', async (req, res) => {
   try {
-    const { title, category_id, status, due_date, notes, assigned_member_id, products } = req.body;
+    const {
+      title,
+      category_id,
+      status,
+      due_date,
+      notes,
+      assigned_member_id,
+      products,
+      sale_price,
+      cost,
+      payment_method,
+      installment_count,
+      paid_amount
+    } = req.body;
     const jobId = req.params.id;
 
     const existing = await db.get('SELECT * FROM jobs WHERE id = ?', jobId);
@@ -180,6 +453,41 @@ router.put('/:id', async (req, res) => {
       ? (typeof products === 'string' ? products : JSON.stringify(products))
       : existing.products;
 
+    // Eğer işin fiyatı/maliyeti henüz 0 ise ve tamamlandı'ya çekiliyorsa (veya kategori/ürün değiştiyse) katalogdan varsayılanları kontrol et
+    let defaultPricing = { sale_price: Number(existing.sale_price) || 0, cost: Number(existing.cost) || 0 };
+    if (defaultPricing.sale_price === 0 && defaultPricing.cost === 0) {
+      const resolved = await resolveDefaultPricing(nextCategoryId, nextProducts);
+      if (resolved.sale_price > 0 || resolved.cost > 0) {
+        defaultPricing = resolved;
+      }
+    }
+
+    const nextSalePrice =
+      sale_price !== undefined && sale_price !== null && sale_price !== ''
+        ? Number(sale_price) || 0
+        : defaultPricing.sale_price;
+    const nextCost =
+      cost !== undefined && cost !== null && cost !== ''
+        ? Number(cost) || 0
+        : defaultPricing.cost;
+    const nextPaymentMethod =
+      payment_method !== undefined && payment_method !== null
+        ? String(payment_method)
+        : (existing.payment_method || 'Havale / EFT');
+    const nextInstallmentCount =
+      installment_count !== undefined && installment_count !== null
+        ? Math.max(1, Number(installment_count) || 1)
+        : Math.max(1, Number(existing.installment_count) || 1);
+    const nextPaidAmount =
+      paid_amount !== undefined && paid_amount !== null && paid_amount !== ''
+        ? Math.max(0, Number(paid_amount) || 0)
+        : (Number(existing.paid_amount) || 0);
+
+    const nextCompletedAt =
+      nextStatus === 'tamamlandi'
+        ? (existing.completed_at || new Date().toISOString())
+        : null;
+
     const updateSql = `
       UPDATE jobs
       SET
@@ -190,6 +498,12 @@ router.put('/:id', async (req, res) => {
         notes = ?,
         assigned_member_id = ?,
         products = ?,
+        sale_price = ?,
+        cost = ?,
+        payment_method = ?,
+        installment_count = ?,
+        paid_amount = ?,
+        completed_at = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
@@ -203,6 +517,12 @@ router.put('/:id', async (req, res) => {
       nextNotes,
       nextMemberId,
       nextProducts,
+      nextSalePrice,
+      nextCost,
+      nextPaymentMethod,
+      nextInstallmentCount,
+      nextPaidAmount,
+      nextCompletedAt,
       jobId
     );
 
@@ -216,7 +536,7 @@ router.put('/:id', async (req, res) => {
         c.color AS category_color,
         m.name AS member_name,
         m.role AS member_role,
-        m.avatar_color AS member_color
+        m.color AS member_color
       FROM jobs j
       JOIN leads l ON j.lead_id = l.id
       LEFT JOIN categories c ON j.category_id = c.id
