@@ -88,47 +88,216 @@ class GoogleMapsService {
   }
 
   /**
+   * Kategori ve arama terimine göre genişletilmiş eşanlamlı ve sektörel alt arama sorguları üretir
+   */
+  generateSynonymQueries(baseQuery, district = '', category = '', city = '', customQuery = '') {
+    const combined = `${category || ''} ${customQuery || ''} ${baseQuery || ''}`.toLowerCase();
+    const synonyms = new Set();
+    const d = district ? district.trim() : '';
+    const c = city ? city.trim() : '';
+    const locPrefix = d ? (c ? `${d} ${c}` : d) : c;
+
+    // Giyim / Butik / Moda / Ayakkabı / Abiye / Tekstil
+    if (
+      combined.includes('giyim') ||
+      combined.includes('butik') ||
+      combined.includes('moda') ||
+      combined.includes('abiye') ||
+      combined.includes('tekstil') ||
+      combined.includes('ayakkab') ||
+      combined.includes('çanta') ||
+      combined.includes('konfeksiyon')
+    ) {
+      synonyms.add(`${locPrefix} butik`);
+      synonyms.add(`${locPrefix} butikler`);
+      synonyms.add(`${locPrefix} kadın giyim`);
+      synonyms.add(`${locPrefix} butik mağazası`);
+      synonyms.add(`${locPrefix} giyim mağazası`);
+      synonyms.add(`${locPrefix} moda butik`);
+      synonyms.add(`${locPrefix} tesettür giyim`);
+      synonyms.add(`${locPrefix} abiye butik`);
+      synonyms.add(`${locPrefix} erkek giyim`);
+      synonyms.add(`${locPrefix} ayakkabı çanta butik`);
+      synonyms.add(`${locPrefix} çocuk giyim`);
+      synonyms.add(`${locPrefix} konfeksiyon`);
+      synonyms.add(`${locPrefix} iç giyim`);
+      if (d) {
+        synonyms.add(`${d} butik`);
+        synonyms.add(`${d} kadın giyim`);
+        synonyms.add(`${d} giyim mağazası`);
+      }
+    }
+    // Kafe / Kahve / Pastane / Tatlıcı
+    else if (
+      combined.includes('kafe') ||
+      combined.includes('cafe') ||
+      combined.includes('kahve') ||
+      combined.includes('coffee') ||
+      combined.includes('pastane') ||
+      combined.includes('tatlı') ||
+      combined.includes('fırın')
+    ) {
+      synonyms.add(`${locPrefix} cafe`);
+      synonyms.add(`${locPrefix} kahve`);
+      synonyms.add(`${locPrefix} coffee`);
+      synonyms.add(`${locPrefix} pastane`);
+      synonyms.add(`${locPrefix} fırın cafe`);
+      synonyms.add(`${locPrefix} tatlıcı`);
+      synonyms.add(`${locPrefix} çay bahçesi`);
+      synonyms.add(`${locPrefix} lounge cafe`);
+      synonyms.add(`${locPrefix} waffle cafe`);
+      if (d) {
+        synonyms.add(`${d} cafe`);
+        synonyms.add(`${d} kahveci`);
+      }
+    }
+    // Restoran / Lokanta / Yemek / Kebap / Döner / Pide
+    else if (
+      combined.includes('restoran') ||
+      combined.includes('restaurant') ||
+      combined.includes('lokanta') ||
+      combined.includes('kebap') ||
+      combined.includes('yemek') ||
+      combined.includes('döner') ||
+      combined.includes('pide') ||
+      combined.includes('köfte')
+    ) {
+      synonyms.add(`${locPrefix} restoran`);
+      synonyms.add(`${locPrefix} restaurant`);
+      synonyms.add(`${locPrefix} lokanta`);
+      synonyms.add(`${locPrefix} kebap`);
+      synonyms.add(`${locPrefix} pide lahmacun`);
+      synonyms.add(`${locPrefix} döner`);
+      synonyms.add(`${locPrefix} köfte`);
+      synonyms.add(`${locPrefix} balık restoranı`);
+      synonyms.add(`${locPrefix} ev yemekleri`);
+      synonyms.add(`${locPrefix} burger pizza`);
+      if (d) {
+        synonyms.add(`${d} lokanta`);
+        synonyms.add(`${d} restoran`);
+      }
+    }
+    // Kuaför / Güzellik / Berber / Estetik / Tırnak
+    else if (
+      combined.includes('kuafor') ||
+      combined.includes('kuaför') ||
+      combined.includes('güzellik') ||
+      combined.includes('berber') ||
+      combined.includes('estetik') ||
+      combined.includes('tırnak') ||
+      combined.includes('lazer')
+    ) {
+      synonyms.add(`${locPrefix} kuaför`);
+      synonyms.add(`${locPrefix} kadın kuaförü`);
+      synonyms.add(`${locPrefix} güzellik salonu`);
+      synonyms.add(`${locPrefix} güzellik merkezi`);
+      synonyms.add(`${locPrefix} berber`);
+      synonyms.add(`${locPrefix} erkek kuaförü`);
+      synonyms.add(`${locPrefix} nail art protez tırnak`);
+      synonyms.add(`${locPrefix} lazer epilasyon`);
+      synonyms.add(`${locPrefix} cilt bakımı`);
+      if (d) {
+        synonyms.add(`${d} kuaför`);
+        synonyms.add(`${d} güzellik salonu`);
+      }
+    }
+    // Diş / Sağlık / Klinik / Hastane / Veteriner
+    else if (
+      combined.includes('saglik') ||
+      combined.includes('sağlık') ||
+      combined.includes('diş') ||
+      combined.includes('klinik') ||
+      combined.includes('hekim') ||
+      combined.includes('doktor') ||
+      combined.includes('poliklinik')
+    ) {
+      synonyms.add(`${locPrefix} diş kliniği`);
+      synonyms.add(`${locPrefix} diş hekimi`);
+      synonyms.add(`${locPrefix} poliklinik`);
+      synonyms.add(`${locPrefix} tıp merkezi`);
+      synonyms.add(`${locPrefix} veteriner kliniği`);
+      synonyms.add(`${locPrefix} fizik tedavi`);
+      synonyms.add(`${locPrefix} psikolog`);
+      if (d) {
+        synonyms.add(`${d} diş kliniği`);
+        synonyms.add(`${d} klinik`);
+      }
+    }
+    // Otel / Konaklama / Pansiyon
+    else if (
+      combined.includes('otel') ||
+      combined.includes('hotel') ||
+      combined.includes('pansiyon') ||
+      combined.includes('konaklama')
+    ) {
+      synonyms.add(`${locPrefix} butik otel`);
+      synonyms.add(`${locPrefix} otel`);
+      synonyms.add(`${locPrefix} pansiyon`);
+      synonyms.add(`${locPrefix} apart otel`);
+      synonyms.add(`${locPrefix} konaklama`);
+    }
+    // Mimarlık / İç Tasarım
+    else if (
+      combined.includes('mimar') ||
+      combined.includes('tasarım') ||
+      combined.includes('dekorasyon')
+    ) {
+      synonyms.add(`${locPrefix} mimarlık ofisi`);
+      synonyms.add(`${locPrefix} iç mimarlık`);
+      synonyms.add(`${locPrefix} mimari tasarım`);
+      synonyms.add(`${locPrefix} dekorasyon`);
+      synonyms.add(`${locPrefix} peyzaj mimarlığı`);
+    }
+    // Diyetisyen / Yaşam / Fitness / Spor
+    else if (
+      combined.includes('diyet') ||
+      combined.includes('pilates') ||
+      combined.includes('fitness') ||
+      combined.includes('spor') ||
+      combined.includes('yoga')
+    ) {
+      synonyms.add(`${locPrefix} diyetisyen`);
+      synonyms.add(`${locPrefix} beslenme ve diyet`);
+      synonyms.add(`${locPrefix} pilates stüdyosu`);
+      synonyms.add(`${locPrefix} fitness spor salonu`);
+      synonyms.add(`${locPrefix} yoga`);
+    }
+    // Genel / Serbest Arama (Örn: Çiçekçi, Oto Yıkama, Sigorta, Avukat, Reklam, vb.)
+    else {
+      const cleanTerm = (customQuery || category || '').trim();
+      if (cleanTerm) {
+        synonyms.add(`${locPrefix} ${cleanTerm}`);
+        synonyms.add(`${locPrefix} ${cleanTerm} firmaları`);
+        synonyms.add(`${locPrefix} ${cleanTerm} mağazası`);
+        synonyms.add(`${locPrefix} ${cleanTerm} merkezi`);
+        if (d) {
+          synonyms.add(`${d} ${cleanTerm}`);
+          synonyms.add(`${cleanTerm} ${d}`);
+        }
+      }
+    }
+
+    return Array.from(synonyms);
+  }
+
+  /**
    * Places API (New) v1 ile Derin Tarama ve Link Doğrulama
    */
   async searchPlacesV1Deep(baseQuery, district, category, city, apiKey, deepSearch = true) {
+    const maxP = deepSearch ? 3 : 1;
     const queryConfigs = [
-      { query: baseQuery, maxPages: deepSearch ? 2 : 1 }
+      { query: baseQuery, maxPages: maxP }
     ];
 
-    // Derin tarama açıksa kategori varyasyonlarını paralel ekle (tüm işletmeleri eksiksiz bulmak için)
+    // Derin tarama açıksa kategori ve sektörel varyasyonları paralel ekle
     if (deepSearch) {
-      const lowerCat = (category || '').toLowerCase();
-      const synonyms = [];
-      if (lowerCat.includes('kafe') || lowerCat.includes('cafe')) {
-        synonyms.push(`${district} ${city} cafe`);
-        synonyms.push(`${district} ${city} kahve`);
-        synonyms.push(`${district} ${city} coffee`);
-        synonyms.push(`${district} ${city} pastane`);
-      } else if (lowerCat.includes('restoran') || lowerCat.includes('restaurant')) {
-        synonyms.push(`${district} ${city} restaurant`);
-        synonyms.push(`${district} ${city} lokanta`);
-        synonyms.push(`${district} ${city} kebap`);
-        synonyms.push(`${district} ${city} yemek`);
-      } else if (lowerCat.includes('giyim')) {
-        synonyms.push(`${district} ${city} butik`);
-        synonyms.push(`${district} ${city} giyim`);
-        synonyms.push(`${district} ${city} moda`);
-        synonyms.push(`${district} ${city} mağaza`);
-      } else if (lowerCat.includes('kuafor') || lowerCat.includes('kuaför')) {
-        synonyms.push(`${district} ${city} kuaför`);
-        synonyms.push(`${district} ${city} güzellik salonu`);
-        synonyms.push(`${district} ${city} berber`);
-      } else if (lowerCat.includes('otel')) {
-        synonyms.push(`${district} ${city} butik otel`);
-        synonyms.push(`${district} ${city} pansiyon`);
-        synonyms.push(`${district} ${city} otel`);
-      } else {
-        synonyms.push(`${district} ${city} ${category}`);
-      }
-
+      const synonyms = this.generateSynonymQueries(baseQuery, district, category, city, baseQuery);
       for (const syn of synonyms) {
-        if (syn.toLowerCase() !== baseQuery.toLowerCase() && !queryConfigs.some(c => c.query.toLowerCase() === syn.toLowerCase())) {
-          queryConfigs.push({ query: syn, maxPages: 2 });
+        if (
+          syn.toLowerCase() !== baseQuery.toLowerCase() &&
+          !queryConfigs.some(c => c.query.toLowerCase() === syn.toLowerCase())
+        ) {
+          queryConfigs.push({ query: syn, maxPages: maxP });
         }
       }
     }
@@ -220,10 +389,11 @@ class GoogleMapsService {
       };
     });
 
-    // Filtre: Eğer kullanıcı belirli bir ilçe aradıysa, adresi başka bir ilçeye ait olanları ayıkla
+    // Filtre: Eğer kullanıcı belirli bir ilçe aradıysa, başka bir ilçeye ait olanları ayıkla
     let finalPlaces = mappedPlaces;
     if (district && district.trim()) {
       const strictDistrictMatches = mappedPlaces.filter(p => p.is_verified_location === 1);
+      // Eğer sıkı ilçe filtresi sonuç veriyorsa onu al; aksi halde kullanıcıya uyarılarıyla birlikte sun
       if (strictDistrictMatches.length > 0) {
         finalPlaces = strictDistrictMatches;
       }
@@ -242,7 +412,7 @@ class GoogleMapsService {
   /**
    * Tek bir metin sorgusu için Places API v1 sayfalarını çeker
    */
-  async fetchV1PagesForQuery(textQuery, apiKey, maxPages = 2) {
+  async fetchV1PagesForQuery(textQuery, apiKey, maxPages = 3) {
     let places = [];
     let pageToken = null;
     let pageCount = 0;

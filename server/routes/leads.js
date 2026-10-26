@@ -71,7 +71,7 @@ const getApiKey = async () => {
 
 const mapsService = new GoogleMapsService(getApiKey);
 
-// 1, 2, 3: Google Maps veya Simülasyon üzerinden işletme ara
+// 1, 2, 3: Google Maps veya Simülasyon üzerinden işletme ara (Mevcut Veritabanı Karşılaştırmalı)
 router.post('/search', async (req, res) => {
   try {
     const { district, category, city = 'İstanbul', query, deepSearch = true } = req.body;
@@ -87,6 +87,94 @@ router.post('/search', async (req, res) => {
       query: query || '',
       deepSearch: Boolean(deepSearch)
     });
+
+    // Veritabanındaki mevcut kayıtları çekip karşılaştır (Hali hazırda ekli olanlar ile yenileri ayrıştır)
+    const existingLeads = await db.all(`
+      SELECT id, place_id, name, phone, raw_phone, status, assigned_caller_name, district, city
+      FROM leads
+    `);
+
+    const STATUS_LABELS = {
+      arama_listesi: 'Arama Listesinde',
+      randevu_arama: 'Tekrar Aranacak',
+      randevu: 'Saha Ziyareti / Randevu',
+      satis_havuzu: 'Satış Havuzunda',
+      is_dagitildi: 'İş Alındı & Dağıtıldı',
+      iletisimsiz: 'Ulaşılamadı',
+      mutlak_olumsuz: 'Olumsuz Görüşüldü'
+    };
+
+    const placeIdMap = new Map();
+    const phoneMap = new Map();
+    const nameMap = new Map();
+
+    for (const l of existingLeads) {
+      if (l.place_id) {
+        placeIdMap.set(l.place_id, l);
+      }
+      const cleanPhone = (l.raw_phone || l.phone || '').replace(/\D/g, '');
+      if (cleanPhone.length >= 7) {
+        phoneMap.set(cleanPhone.slice(-7), l);
+      }
+      const cleanNameStr = (l.name || '').toLowerCase().trim();
+      const cleanDistStr = (l.district || '').toLowerCase().trim();
+      if (cleanNameStr.length >= 3) {
+        nameMap.set(`${cleanNameStr}__${cleanDistStr}`, l);
+      }
+    }
+
+    const rawData = searchResult.data || [];
+    let existingCount = 0;
+    let newCount = 0;
+
+    const enrichedData = rawData.map(p => {
+      let matchedLead = null;
+      if (p.place_id && placeIdMap.has(p.place_id)) {
+        matchedLead = placeIdMap.get(p.place_id);
+      } else {
+        const pPhone = (p.raw_phone || p.phone || '').replace(/\D/g, '');
+        if (pPhone.length >= 7 && phoneMap.has(pPhone.slice(-7))) {
+          matchedLead = phoneMap.get(pPhone.slice(-7));
+        } else {
+          const pName = (p.name || '').toLowerCase().trim();
+          const pDist = (p.district || p.actual_district || district || '').toLowerCase().trim();
+          if (pName.length >= 3 && nameMap.has(`${pName}__${pDist}`)) {
+            matchedLead = nameMap.get(`${pName}__${pDist}`);
+          }
+        }
+      }
+
+      if (matchedLead) {
+        existingCount++;
+        return {
+          ...p,
+          is_existing: true,
+          existing_id: matchedLead.id,
+          existing_status: matchedLead.status,
+          existing_status_label: STATUS_LABELS[matchedLead.status] || 'Arama Listesinde',
+          existing_caller_name: matchedLead.assigned_caller_name || null
+        };
+      } else {
+        newCount++;
+        return {
+          ...p,
+          is_existing: false,
+          existing_id: null,
+          existing_status: null,
+          existing_status_label: null,
+          existing_caller_name: null
+        };
+      }
+    });
+
+    searchResult.data = enrichedData;
+    searchResult.totalFound = enrichedData.length;
+    searchResult.existingCount = existingCount;
+    searchResult.newCount = newCount;
+    searchResult.summaryMessage =
+      existingCount > 0
+        ? `${existingCount} tanesi daha önce günlük arama listesine eklendi, yeni bulunan ${newCount} adet işletme var.`
+        : `Toplam ${newCount} yeni işletme bulundu!`;
 
     res.json(searchResult);
   } catch (err) {

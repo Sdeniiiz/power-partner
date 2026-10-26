@@ -70,6 +70,8 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
   const [importStatus, setImportStatus] = useState(null);
   const [filterNoWebsite, setFilterNoWebsite] = useState(false);
   const [filterMobileOnly, setFilterMobileOnly] = useState(false);
+  const [filterScope, setFilterScope] = useState('all'); // 'all' | 'new_only' | 'existing_only'
+  const [searchSummary, setSearchSummary] = useState(null);
 
   // Personel Paylaştırma State
   const [teamMembers, setTeamMembers] = useState([]);
@@ -118,7 +120,22 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
       setResults(list);
       setIsDemoData(res.isDemo || false);
       setSearchError(res.error || null);
-      setSelectedIds(new Set(list.map(item => item.place_id)));
+
+      const summary = {
+        totalFound: res.totalFound || list.length,
+        existingCount: res.existingCount !== undefined ? res.existingCount : list.filter(p => p.is_existing).length,
+        newCount: res.newCount !== undefined ? res.newCount : list.filter(p => !p.is_existing).length,
+        summaryMessage: res.summaryMessage || ''
+      };
+      setSearchSummary(summary);
+
+      // Varsayılan olarak YALNIZCA YENİ BULUNAN işletmeleri seç (Zaten ekli olanları mükerrer seçmemesi için)
+      const newItems = list.filter(item => !item.is_existing);
+      if (newItems.length > 0) {
+        setSelectedIds(new Set(newItems.map(item => item.place_id)));
+      } else {
+        setSelectedIds(new Set(list.map(item => item.place_id)));
+      }
     } catch (err) {
       const msg = err.response?.data?.error || err.message;
       setSearchError(`Arama isteği başarısız oldu: ${msg}`);
@@ -317,10 +334,25 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
 
   // Filtrelenmiş sonuçlar
   const filteredResults = results.filter(item => {
+    if (filterScope === 'new_only' && item.is_existing) return false;
+    if (filterScope === 'existing_only' && !item.is_existing) return false;
     if (filterNoWebsite && item.has_website) return false;
     if (filterMobileOnly && !item.is_mobile) return false;
     return true;
   });
+
+  const selectOnlyNew = () => {
+    const newIds = filteredResults.filter(r => !r.is_existing).map(r => r.place_id);
+    setSelectedIds(new Set(newIds));
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedIds(new Set(filteredResults.map(r => r.place_id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
 
 
   return (
@@ -735,20 +767,88 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
 
       {/* Arama Sonuçları & Liste Kontrolü (Adım 3 & 4) */}
       {results.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden min-w-0 max-w-full">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden min-w-0 max-w-full space-y-0">
 
-          
+          {/* MEVCUT VS YENİ İŞLETME KARŞILAŞTIRMA ÖZET BANNERI */}
+          {searchSummary && (
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-4 sm:p-5 border-b border-indigo-900/50">
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                      📊 Tarama ve Mevcut Veri Teyidi
+                    </span>
+                    <span className="text-xs font-bold text-slate-300">
+                      Genişletilmiş Sektörel Radar
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-white mt-1">
+                    {searchSummary.existingCount > 0
+                      ? `${searchSummary.existingCount} tanesi daha önce günlük arama listesine eklendi, yeni bulunan ${searchSummary.newCount} adet işletme var!`
+                      : `Haritada toplam ${searchSummary.newCount} adet yeni işletme bulundu!`}
+                  </h3>
+                  <p className="text-xs text-slate-300/90 mt-0.5">
+                    Sistem daha önce sisteme eklediğiniz işletmeleri otomatik tanıdı. Varsayılan olarak yalnızca <strong>yeni bulunan işletmeler</strong> seçilmiştir.
+                  </p>
+                </div>
+
+                {/* Filtreleme ve Hızlı Seçim Butonları */}
+                <div className="flex flex-wrap items-center gap-1.5 shrink-0 bg-white/10 p-1 rounded-xl border border-white/15">
+                  <button
+                    type="button"
+                    onClick={() => setFilterScope('all')}
+                    className={`text-xs font-extrabold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      filterScope === 'all'
+                        ? 'bg-white text-slate-950 shadow-xs'
+                        : 'text-slate-200 hover:bg-white/10'
+                    }`}
+                  >
+                    Tümü ({searchSummary.totalFound})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterScope('new_only')}
+                    className={`text-xs font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                      filterScope === 'new_only'
+                        ? 'bg-emerald-500 text-slate-950 shadow-xs'
+                        : 'text-emerald-300 hover:bg-white/10'
+                    }`}
+                  >
+                    <span>✨ Sadece Yeniler ({searchSummary.newCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterScope('existing_only')}
+                    className={`text-xs font-extrabold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      filterScope === 'existing_only'
+                        ? 'bg-amber-400 text-slate-950 shadow-xs'
+                        : 'text-amber-200 hover:bg-white/10'
+                    }`}
+                  >
+                    ✓ Daha Önce Eklenenler ({searchSummary.existingCount})
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Sonuç Başlığı & Aksiyon Barı */}
           <div className="p-3.5 sm:p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 min-w-0">
             <div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="font-extrabold text-lg text-slate-900">
-                  Bulunan İşletmeler ({filteredResults.length})
+                  Görüntülenen İşletmeler ({filteredResults.length})
                 </h2>
-                <span className="bg-blue-100 text-blue-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-blue-200 flex items-center gap-1">
-                  <Zap className="w-3 h-3 text-blue-600" />
-                  {results.length} İşletme Tespit Edildi
-                </span>
+                {searchSummary && (
+                  <>
+                    <span className="bg-emerald-100 text-emerald-800 text-[11px] font-black px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      ✨ {searchSummary.newCount} Yeni
+                    </span>
+                    <span className="bg-amber-100 text-amber-900 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-amber-200">
+                      ✓ {searchSummary.existingCount} Sistemde Ekli
+                    </span>
+                  </>
+                )}
                 {isDemoData && (
                   <span className="bg-amber-100 text-amber-800 text-[11px] font-bold px-2 py-0.5 rounded-full border border-amber-200">
                     Simülasyon Verisi
@@ -756,7 +856,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                 )}
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                {district} / {city} bölgesinde {category} kategorisinde tespit edilen tüm işletmeler
+                {district} / {city} bölgesinde genişletilmiş sektörel radarla bulunan işletmeler
               </p>
             </div>
 
@@ -812,6 +912,48 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
             </div>
           </div>
 
+          {/* Hızlı Seçim Yardımcı Çubuğu */}
+          <div className="px-4 py-2 bg-slate-100/70 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-600 font-bold">
+              <span>Seçim: {selectedIds.size} / {filteredResults.length}</span>
+              <button
+                type="button"
+                onClick={selectOnlyNew}
+                className="text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded font-black cursor-pointer"
+              >
+                ✨ Sadece Yenileri Seç ({filteredResults.filter(r => !r.is_existing).length})
+              </button>
+              <button
+                type="button"
+                onClick={selectAllFiltered}
+                className="text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded font-bold cursor-pointer"
+              >
+                Tümünü Seç ({filteredResults.length})
+              </button>
+              {selectedIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="text-slate-500 hover:text-rose-600 px-1 py-0.5 font-medium cursor-pointer"
+                >
+                  Seçimi Kaldır
+                </button>
+              )}
+            </div>
+
+            <div className="text-[11px] text-slate-500">
+              {results.filter(r => r.is_existing && selectedIds.has(r.place_id)).length > 0 ? (
+                <span className="text-amber-700 font-bold">
+                  ⚠️ Seçilenlerin {results.filter(r => r.is_existing && selectedIds.has(r.place_id)).length} tanesi sistemde zaten kayıtlı (aktarıldığında bilgileri güncellenir).
+                </span>
+              ) : (
+                <span className="text-emerald-700 font-bold">
+                  ✓ Seçili olanların tamamı sisteme yeni eklenecek işletmelerdir.
+                </span>
+              )}
+            </div>
+          </div>
+
           {/* Başarı / Bilgi Uyarısı */}
           {importStatus && (
             <div className={`p-3.5 text-xs font-bold flex items-center justify-between ${
@@ -860,7 +1002,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                     <tr 
                       key={item.place_id} 
                       className={`hover:bg-blue-50/40 transition-colors ${
-                        isSelected ? 'bg-blue-50/20' : ''
+                        isSelected ? 'bg-blue-50/20' : (item.is_existing ? 'bg-slate-50/60 opacity-90' : 'bg-emerald-50/15')
                       }`}
                     >
                       <td className="p-3.5 text-center">
@@ -874,8 +1016,18 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
 
                       {/* İşletme Adı & Konum Bilgisi */}
                       <td className="p-3.5">
-                        <div className="font-extrabold text-slate-900 text-sm">
-                          {item.name}
+                        <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
+                          <span>{item.name}</span>
+                          {item.is_existing ? (
+                            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-900 border border-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full shadow-2xs">
+                              ✓ Sistemde Ekli ({item.existing_status_label || 'Arama Listesi'})
+                              {item.existing_caller_name && <span className="opacity-80">• {item.existing_caller_name}</span>}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full shadow-2xs">
+                              ✨ Yeni Bulunan
+                            </span>
+                          )}
                         </div>
                         <div className="text-slate-600 text-[11px] mt-0.5 flex items-start gap-1">
                           <MapPin className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
