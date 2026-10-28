@@ -17,7 +17,15 @@ import {
   Building2,
   Calendar,
   Sparkles,
-  X
+  X,
+  PhoneCall,
+  Users,
+  UserCheck,
+  MessageSquare,
+  Clock,
+  MapPin,
+  Phone,
+  Briefcase
 } from 'lucide-react';
 import {
   updateJob,
@@ -25,7 +33,9 @@ import {
   getServicePricing,
   saveServicePricing,
   updateServicePricing,
-  deleteServicePricing
+  deleteServicePricing,
+  getJobHistory,
+  parseCallNote
 } from '../api';
 
 const PAYMENT_METHODS = [
@@ -65,6 +75,119 @@ export default function AdminCompletedFinanceSection({
   // Tamamlanan İş Finans & Ödeme Düzenleme Modalı
   const [financeModalJob, setFinanceModalJob] = useState(null);
   const [savingFinanceJob, setSavingFinanceJob] = useState(false);
+
+  // Görev Alanlar & Çağrı/Görüşme Geçmişi Modalı (Sadece Admin)
+  const [historyModalJob, setHistoryModalJob] = useState(null);
+  const [historyData, setHistoryData] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Bir iş için görev alan ekibi (Arayanlar, Saha, Üretim/Sorumlu) toparlayıcı yardımcı
+  const getInvolvedTeamSummary = (job) => {
+    if (!job) return { callers: [], fieldMember: null, productionMember: null };
+    const callers = new Set();
+    if (job.call_log_callers) {
+      String(job.call_log_callers)
+        .split(',')
+        .forEach(c => {
+          const trimmed = c.trim();
+          if (trimmed) callers.add(trimmed);
+        });
+    }
+    if (job.lead_assigned_caller_name && String(job.lead_assigned_caller_name).trim()) {
+      callers.add(String(job.lead_assigned_caller_name).trim());
+    }
+    // Eğer call_logs tablosundan gelmediyse lead_call_notes formatlı satırlarından yazarları çek
+    if (callers.size === 0 && job.lead_call_notes) {
+      String(job.lead_call_notes)
+        .split('\n')
+        .forEach(line => {
+          const parsed = parseCallNote(line);
+          if (parsed && parsed.author && parsed.author.trim()) {
+            callers.add(parsed.author.trim());
+          }
+        });
+    }
+    return {
+      callers: Array.from(callers),
+      fieldMember: job.lead_field_member_name || null,
+      productionMember: job.member_name || null
+    };
+  };
+
+  const handleOpenHistoryModal = async (job) => {
+    setHistoryModalJob(job);
+    setLoadingHistory(true);
+    setHistoryData(null);
+    try {
+      const res = await getJobHistory(job.id);
+      if (res && res.data) {
+        setHistoryData(res.data);
+      }
+    } catch (err) {
+      console.error('İş çağrı ve görev geçmişi alınamadı:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const getOutcomeBadge = (outcome) => {
+    switch (outcome) {
+      case 'randevu':
+        return (
+          <span className="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-md">
+            🤝 Yüz Yüze Randevu
+          </span>
+        );
+      case 'randevu_arama':
+        return (
+          <span className="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-md">
+            ⏰ Arama Randevusu
+          </span>
+        );
+      case 'satis_havuzu':
+      case 'satis':
+        return (
+          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-md">
+            🎉 Satış / Hizmet
+          </span>
+        );
+      case 'iletisimsiz':
+        return (
+          <span className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+            📵 İletişimsiz
+          </span>
+        );
+      case 'mutlak_olumsuz':
+        return (
+          <span className="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+            ❌ Olumsuz
+          </span>
+        );
+      default:
+        return (
+          <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+            {outcome || 'Görüşüldü'}
+          </span>
+        );
+    }
+  };
+
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleString('tr-TR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return dateStr;
+    }
+  };
 
   const loadPricing = async () => {
     setLoadingPricing(true);
@@ -779,7 +902,7 @@ export default function AdminCompletedFinanceSection({
             <thead className="bg-slate-100/80 text-slate-600 uppercase font-extrabold border-b border-slate-200 tracking-wider">
               <tr>
                 <th className="p-3.5">Tamamlanan İş & Müşteri</th>
-                <th className="p-3.5">Kategori & Sorumlu</th>
+                <th className="p-3.5 min-w-[210px]">Kategori & Görev Alanlar</th>
                 <th className="p-3.5">Satış Fiyatı / Maliyet / Kazanç</th>
                 <th className="p-3.5">Ödeme Şekli & Taksit</th>
                 <th className="p-3.5">Alınan & Kalan Ödeme</th>
@@ -854,16 +977,77 @@ export default function AdminCompletedFinanceSection({
                         )}
                       </td>
 
-                      {/* 2. Kategori & Sorumlu */}
+                      {/* 2. Kategori & Görev Alanlar */}
                       <td className="p-3.5">
-                        <span
-                          className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-md text-white mb-1"
-                          style={{ backgroundColor: job.category_color || '#6366f1' }}
-                        >
-                          {job.category_name || 'Hizmet'}
-                        </span>
-                        <div className="text-xs font-bold text-slate-800">
-                          {job.member_name || 'Atanmadı'}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span
+                              className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-md text-white"
+                              style={{ backgroundColor: job.category_color || '#6366f1' }}
+                            >
+                              {job.category_name || 'Hizmet'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenHistoryModal(job)}
+                              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1 cursor-pointer transition-colors"
+                              title="Bu işte kimlerin aradığını ve neler konuşulduğunu gör"
+                            >
+                              <PhoneCall className="w-2.5 h-2.5 text-indigo-600" />
+                              <span>
+                                Görüşmeler ({job.call_log_count || (job.lead_call_notes ? String(job.lead_call_notes).split('\n').filter(Boolean).length : 0)})
+                              </span>
+                            </button>
+                          </div>
+
+                          {/* Görev Alan Ekip Listesi */}
+                          <div className="space-y-1 text-xs">
+                            {/* 1. Üretim / Tasarım / İş Sorumlusu */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded border border-slate-200 shrink-0">
+                                🛠️ Sorumlu:
+                              </span>
+                              <span className="font-extrabold text-slate-900 truncate max-w-[140px]" title={job.member_name || 'Atanmadı'}>
+                                {job.member_name || 'Atanmadı'}
+                              </span>
+                            </div>
+
+                            {/* 2. Arama Yapan(lar) */}
+                            {(() => {
+                              const teamSummary = getInvolvedTeamSummary(job);
+                              return (
+                                <>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-1.5 py-0.2 rounded border border-blue-200 shrink-0">
+                                      🎧 Arayan:
+                                    </span>
+                                    <span
+                                      className={`text-xs truncate max-w-[140px] ${
+                                        teamSummary.callers.length > 0
+                                          ? 'font-extrabold text-blue-900'
+                                          : 'text-slate-400 italic'
+                                      }`}
+                                      title={teamSummary.callers.join(', ')}
+                                    >
+                                      {teamSummary.callers.length > 0 ? teamSummary.callers.join(', ') : 'Belirtilmedi'}
+                                    </span>
+                                  </div>
+
+                                  {/* 3. Saha Temsilcisi (varsa) */}
+                                  {teamSummary.fieldMember && (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] font-bold bg-purple-50 text-purple-700 px-1.5 py-0.2 rounded border border-purple-200 shrink-0">
+                                        🚗 Saha:
+                                      </span>
+                                      <span className="font-extrabold text-purple-900 text-xs truncate max-w-[140px]" title={teamSummary.fieldMember}>
+                                        {teamSummary.fieldMember}
+                                      </span>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
                         </div>
                       </td>
 
@@ -1007,6 +1191,16 @@ export default function AdminCompletedFinanceSection({
                       {/* 7. İşlem Butonları */}
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenHistoryModal(job)}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-extrabold text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer shrink-0 transition-colors shadow-2xs"
+                            title="Bu işte görev alan personelleri, aramaları ve konuşulan tüm notları gör"
+                          >
+                            <Users className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Ekip & Notlar</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => openFinanceModal(job)}
@@ -1294,6 +1488,289 @@ export default function AdminCompletedFinanceSection({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ======================================================================= */}
+      {/* GÖREV ALANLAR & ÇAĞRI / GÖRÜŞME GEÇMİŞİ MODALI (YALNIZCA ADMİN) */}
+      {/* ======================================================================= */}
+      {historyModalJob && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 my-auto max-h-[92vh] flex flex-col">
+            {/* Modal Başlık */}
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    🔒 Sadece Admin
+                  </span>
+                  <span className="text-xs font-black text-indigo-600 uppercase tracking-wider">
+                    Görev Alan Ekip & Görüşme Detayları
+                  </span>
+                </div>
+                <h3 className="font-black text-lg text-slate-900 mt-1">
+                  {historyModalJob.lead_name}
+                </h3>
+                <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5 flex-wrap">
+                  <span className="font-bold text-slate-800">{historyModalJob.title}</span>
+                  <span>•</span>
+                  <span>{historyModalJob.lead_district || historyModalJob.lead_city || 'İlçe Belirtilmedi'}</span>
+                  {historyModalJob.lead_phone && (
+                    <>
+                      <span>•</span>
+                      <a
+                        href={`tel:${historyModalJob.lead_phone}`}
+                        className="text-indigo-600 hover:underline font-bold"
+                      >
+                        📞 {historyModalJob.lead_phone}
+                      </a>
+                    </>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setHistoryModalJob(null);
+                  setHistoryData(null);
+                }}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Gövde (Scrollable) */}
+            <div className="overflow-y-auto mt-4 space-y-4 pr-1 scrollbar-thin flex-1">
+              {loadingHistory ? (
+                <div className="py-16 text-center text-slate-400 flex flex-col items-center justify-center">
+                  <RefreshCw className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
+                  <p className="text-xs font-bold text-slate-600">
+                    Görev alan ekip ve görüşme kayıtları yükleniyor...
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* 1. GÖREV ALANLAR ÖZET KARTLARI */}
+                  <div>
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Bu İşte Görev Alan Ekip</span>
+                    </h4>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {/* Kart A: Arayan(lar) */}
+                      <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-3">
+                        <div className="text-[10px] font-extrabold text-blue-700 uppercase tracking-wider flex items-center gap-1">
+                          <PhoneCall className="w-3 h-3" />
+                          <span>Aramayı Yapan(lar)</span>
+                        </div>
+                        <div className="mt-1.5">
+                          {(() => {
+                            const callers = historyData?.team?.callers || [];
+                            if (callers.length === 0) {
+                              const fallbackSummary = getInvolvedTeamSummary(historyModalJob);
+                              if (fallbackSummary.callers.length > 0) {
+                                return (
+                                  <div className="flex flex-wrap gap-1">
+                                    {fallbackSummary.callers.map(c => (
+                                      <span key={c} className="bg-white border border-blue-300 text-blue-900 font-black text-xs px-2 py-0.5 rounded-lg shadow-2xs">
+                                        👤 {c}
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
+                              }
+                              return (
+                                <span className="text-xs font-medium text-slate-400 italic">
+                                  Kayıtlı arayan bulunamadı
+                                </span>
+                              );
+                            }
+                            return (
+                              <div className="flex flex-wrap gap-1">
+                                {callers.map(c => (
+                                  <span key={c} className="bg-white border border-blue-300 text-blue-900 font-black text-xs px-2 py-0.5 rounded-lg shadow-2xs">
+                                    👤 {c}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                        <div className="text-[10px] text-blue-600/80 mt-1">
+                          Telemarketing / Çağrı personeli
+                        </div>
+                      </div>
+
+                      {/* Kart B: Saha Temsilcisi */}
+                      <div className="bg-purple-50/70 border border-purple-200/80 rounded-2xl p-3">
+                        <div className="text-[10px] font-extrabold text-purple-700 uppercase tracking-wider flex items-center gap-1">
+                          <span>🚗</span>
+                          <span>Saha / Ziyaret</span>
+                        </div>
+                        <div className="mt-1.5 font-black text-xs text-purple-950">
+                          {historyData?.team?.field_member || historyModalJob.lead_field_member_name ? (
+                            <span className="bg-white border border-purple-300 text-purple-900 px-2 py-0.5 rounded-lg inline-block shadow-2xs">
+                              🤝 {historyData?.team?.field_member || historyModalJob.lead_field_member_name}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-medium italic">
+                              Saha ziyareti yok (Ofis/Çağrı)
+                            </span>
+                          )}
+                        </div>
+                        {historyModalJob.lead_visit_date && (
+                          <div className="text-[10px] text-purple-700 font-bold mt-1">
+                            📅 Ziyaret: {formatDateTime(historyModalJob.lead_visit_date)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Kart C: İş Sorumlusu (Üretim/Tasarım) */}
+                      <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-3">
+                        <div className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider flex items-center gap-1">
+                          <Briefcase className="w-3 h-3" />
+                          <span>İş / Üretim Sorumlusu</span>
+                        </div>
+                        <div className="mt-1.5 font-black text-xs text-emerald-950">
+                          {historyData?.job?.member_name || historyModalJob.member_name ? (
+                            <span className="bg-white border border-emerald-300 text-emerald-900 px-2 py-0.5 rounded-lg inline-block shadow-2xs">
+                              🛠️ {historyData?.job?.member_name || historyModalJob.member_name}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-medium italic">
+                              Atanmadı
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-emerald-600/80 mt-1">
+                          İşi üstlenen & teslim eden
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. ÇAĞRI GEÇMİŞİ VE KONUŞULANLAR (TIMELINE) */}
+                  <div>
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <MessageSquare className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Neler Konuşuldu? (Görüşme ve Çağrı Kayıtları)</span>
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                        {(historyData?.calls?.length || 0)} Çağrı Kaydı
+                      </span>
+                    </h4>
+
+                    {(!historyData?.calls || historyData.calls.length === 0) &&
+                     (!historyData?.lead_call_notes && !historyModalJob.lead_call_notes) ? (
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center text-slate-400">
+                        <PhoneCall className="w-8 h-8 mx-auto mb-1 text-slate-300" />
+                        <p className="text-xs font-bold text-slate-600">
+                          Bu işletme için kaydedilmiş bir görüşme veya çağrı notu bulunamadı.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {/* 1. Yapılandırılmış Çağrı Logları */}
+                        {historyData?.calls && historyData.calls.map((call) => (
+                          <div
+                            key={call.id}
+                            className="bg-slate-50/80 hover:bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 text-xs transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-200/70">
+                              <div className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white font-black text-[11px] flex items-center justify-center shadow-2xs">
+                                  {(call.caller_name || 'P')[0]?.toUpperCase()}
+                                </span>
+                                <span className="font-black text-slate-900 text-xs">
+                                  {call.caller_name || 'Operatör / Arayan'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {call.outcome && getOutcomeBadge(call.outcome)}
+                                <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  <span>{formatDateTime(call.created_at)}</span>
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Konuşulan Detaylar / Not */}
+                            <div className="mt-2.5">
+                              {call.notes && call.notes.trim() ? (
+                                <p className="text-slate-700 font-medium text-xs leading-relaxed italic bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
+                                  "{call.notes.trim()}"
+                                </p>
+                              ) : (
+                                <p className="text-slate-400 italic text-[11px]">
+                                  (Bu arama için görüşme detayı girilmemiş)
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* 2. Formatlı Metin Olarak Kaydedilen Görüşme Notları (Varsa) */}
+                        {(() => {
+                          const rawNotes = historyData?.lead_call_notes || historyModalJob.lead_call_notes || '';
+                          const noteLines = rawNotes.split('\n').filter(Boolean);
+                          if (noteLines.length > 0 && (!historyData?.calls || historyData.calls.length === 0)) {
+                            return (
+                              <div className="space-y-2 mt-2">
+                                <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                                  Görüşme Notları ({noteLines.length}):
+                                </div>
+                                {noteLines.map((line, idx) => {
+                                  const parsed = parseCallNote(line);
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="bg-indigo-50/40 border border-indigo-200/60 rounded-xl p-3 text-xs"
+                                    >
+                                      <div className="flex items-center justify-between gap-2 flex-wrap mb-1.5">
+                                        <span className="font-extrabold text-indigo-900 text-xs">
+                                          👤 {parsed.author || 'Operatör'}
+                                        </span>
+                                        {(parsed.date || parsed.time) && (
+                                          <span className="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                            {parsed.date} {parsed.time || ''}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-slate-800 leading-relaxed italic">
+                                        "{parsed.content}"
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Alt Kapat Butonu */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end shrink-0 mt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setHistoryModalJob(null);
+                  setHistoryData(null);
+                }}
+                className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl cursor-pointer transition-colors shadow-2xs"
+              >
+                Kapat
+              </button>
+            </div>
           </div>
         </div>
       )}

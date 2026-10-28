@@ -232,6 +232,20 @@ router.get('/', async (req, res) => {
         l.district as lead_district,
         l.city as lead_city,
         l.website as lead_website,
+        l.assigned_caller_name as lead_assigned_caller_name,
+        l.field_member_name as lead_field_member_name,
+        l.visit_date as lead_visit_date,
+        l.call_notes as lead_call_notes,
+        (
+          SELECT GROUP_CONCAT(DISTINCT caller_name)
+          FROM call_logs
+          WHERE lead_id = j.lead_id AND caller_name IS NOT NULL AND TRIM(caller_name) != ''
+        ) as call_log_callers,
+        (
+          SELECT COUNT(*)
+          FROM call_logs
+          WHERE lead_id = j.lead_id
+        ) as call_log_count,
         c.name as category_name,
         c.color as category_color,
         m.name as member_name,
@@ -263,6 +277,84 @@ router.get('/', async (req, res) => {
 
     const jobs = await db.all(query, ...params);
     res.json({ data: jobs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// İşe ait görev alan ekip ve çağrı/görüşme geçmişini getir (Admin detay görünümü)
+router.get('/:id/history', async (req, res) => {
+  try {
+    const job = await db.get(
+      `
+      SELECT
+        j.*,
+        l.name as lead_name,
+        l.phone as lead_phone,
+        l.district as lead_district,
+        l.city as lead_city,
+        l.address as lead_address,
+        l.website as lead_website,
+        l.assigned_caller_id as lead_assigned_caller_id,
+        l.assigned_caller_name as lead_assigned_caller_name,
+        l.field_member_id as lead_field_member_id,
+        l.field_member_name as lead_field_member_name,
+        l.visit_date as lead_visit_date,
+        l.call_notes as lead_call_notes,
+        c.name as category_name,
+        c.color as category_color,
+        m.name as member_name,
+        m.role as member_role,
+        m.color as member_color,
+        m.email as member_email
+      FROM jobs j
+      JOIN leads l ON j.lead_id = l.id
+      LEFT JOIN categories c ON j.category_id = c.id
+      LEFT JOIN team_members m ON j.assigned_member_id = m.id
+      WHERE j.id = ?
+    `,
+      req.params.id
+    );
+
+    if (!job) {
+      return res.status(404).json({ error: 'İş kaydı bulunamadı.' });
+    }
+
+    const calls = await db.all(
+      `
+      SELECT id, lead_id, outcome, caller_name, notes, created_at
+      FROM call_logs
+      WHERE lead_id = ?
+      ORDER BY created_at DESC, id DESC
+    `,
+      job.lead_id
+    );
+
+    // Çağrı yapanları toparla (call_logs + lead.assigned_caller_name)
+    const callerNamesSet = new Set();
+    if (job.lead_assigned_caller_name && job.lead_assigned_caller_name.trim()) {
+      callerNamesSet.add(job.lead_assigned_caller_name.trim());
+    }
+    (calls || []).forEach(c => {
+      if (c.caller_name && c.caller_name.trim()) {
+        callerNamesSet.add(c.caller_name.trim());
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        job,
+        calls: calls || [],
+        lead_call_notes: job.lead_call_notes || '',
+        team: {
+          callers: Array.from(callerNamesSet),
+          assigned_caller: job.lead_assigned_caller_name || null,
+          field_member: job.lead_field_member_name || null,
+          production_member: job.member_name || null
+        }
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

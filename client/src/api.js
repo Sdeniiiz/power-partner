@@ -44,6 +44,7 @@ export const renameCampaign = (data) => api.put('/leads/campaigns/rename', data)
 export const deleteCampaign = (data) => api.delete('/leads/campaigns/delete', { data }).then(res => res.data);
 
 export const getJobs = (params) => api.get('/jobs', { params }).then(res => res.data);
+export const getJobHistory = (id) => api.get(`/jobs/${id}/history`).then(res => res.data);
 export const createJob = (data) => api.post('/jobs', data).then(res => res.data);
 export const updateJob = (id, data) => api.put(`/jobs/${id}`, data).then(res => res.data);
 export const deleteJob = (id, data) => api.delete(`/jobs/${id}`, { data }).then(res => res.data);
