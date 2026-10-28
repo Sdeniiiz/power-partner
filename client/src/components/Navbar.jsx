@@ -191,55 +191,65 @@ export default function Navbar({
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs w-full max-w-full overflow-visible">
-      <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8">
+      <div className="w-full max-w-[1720px] mx-auto px-2 sm:px-4 lg:px-6">
         <div className="flex items-center justify-between h-14 sm:h-16 gap-1 sm:gap-2">
           
           {/* Logo & Slogan */}
-          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-            <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-blue-200 shrink-0">
-              <Layers className="w-4 h-4 sm:w-6 sm:h-6" />
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-blue-200 shrink-0">
+              <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-1 sm:gap-2">
-                <span className="font-extrabold text-sm sm:text-xl tracking-tight text-slate-900">
+              <div className="flex items-center gap-1">
+                <span className="font-black text-sm sm:text-lg tracking-tight text-slate-900">
                   Power<span className="text-blue-600">Partner</span>
                 </span>
-                <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-semibold px-1.5 py-0.5 rounded-full border border-blue-200 hidden sm:inline-block">
+                <span className="bg-blue-50 text-blue-700 text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.2 rounded-full border border-blue-200 hidden sm:inline-block">
                   v2.0
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium hidden md:block">
-                Harita Aday Bulucu & İş Dağıtım Sistemi
-              </p>
             </div>
           </div>
 
           {/* Navigasyon Sekmeleri */}
-          <nav className="hidden md:flex items-center gap-1 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200/60">
+          <nav className="hidden md:flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 overflow-x-auto scrollbar-none max-w-full">
+            {isAdmin && (
+              <button
+                onClick={() => setActiveTab('cockpit')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all whitespace-nowrap cursor-pointer ${
+                  activeTab === 'cockpit'
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md ring-2 ring-amber-400/40'
+                    : 'text-amber-900 bg-amber-50/90 hover:bg-amber-100 border border-amber-200/80'
+                }`}
+              >
+                <span>👑 Kokpit</span>
+              </button>
+            )}
+
             {isAdmin && (
               <button
                 onClick={() => setActiveTab('finder')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTab === 'finder'
                     ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
                 }`}
               >
-                <MapPin className="w-4 h-4 text-blue-600" />
-                <span>1. Harita Arama</span>
+                <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                <span>1. Harita</span>
               </button>
             )}
 
             <button
               onClick={() => setActiveTab('calls')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all relative ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all relative whitespace-nowrap cursor-pointer ${
                 activeTab === 'calls'
                   ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
               }`}
             >
-              <PhoneCall className="w-4 h-4 text-emerald-600" />
-              <span>2. Günlük Arama</span>
+              <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
+              <span>2. Arama</span>
               {stats?.in_queue > 0 && (
                 <span className="bg-emerald-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
                   {stats.in_queue}
@@ -249,14 +259,14 @@ export default function Navbar({
 
             <button
               onClick={() => setActiveTab('sales')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all relative ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all relative whitespace-nowrap cursor-pointer ${
                 activeTab === 'sales'
                   ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
               }`}
             >
-              <Briefcase className="w-4 h-4 text-purple-600" />
-              <span>3. Satış & İş Dağıtımı</span>
+              <Briefcase className="w-3.5 h-3.5 text-purple-600" />
+              <span>3. Havuz</span>
               {stats?.satis_havuzu > 0 && (
                 <span className="bg-purple-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full animate-pulse">
                   {stats.satis_havuzu}
@@ -266,26 +276,26 @@ export default function Navbar({
 
             <button
               onClick={() => setActiveTab('member')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'member'
                   ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
               }`}
             >
-              <UserCheck className="w-4 h-4 text-indigo-600" />
-              <span>4. Çalışan Ekranı</span>
+              <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+              <span>4. Görevler</span>
             </button>
 
             {canAccessFieldRoute && (
               <button
                 onClick={() => setActiveTab('field_route')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all relative ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all relative whitespace-nowrap cursor-pointer ${
                   activeTab === 'field_route'
                     ? 'bg-emerald-600 text-white shadow-xs'
                     : 'text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/70'
                 }`}
               >
-                <Navigation className={`w-4 h-4 ${activeTab === 'field_route' ? 'text-white' : 'text-emerald-600'}`} />
+                <Navigation className={`w-3.5 h-3.5 ${activeTab === 'field_route' ? 'text-white' : 'text-emerald-600'}`} />
                 <span>🚗 Saha Rotam</span>
                 {stats?.randevu > 0 && (
                   <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full ${
@@ -299,45 +309,33 @@ export default function Navbar({
 
             <button
               onClick={() => setActiveTab('calendar')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'calendar'
                   ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
               }`}
             >
-              <Calendar className="w-4 h-4 text-amber-600" />
+              <Calendar className="w-3.5 h-3.5 text-amber-600" />
               <span>5. Takvim</span>
             </button>
 
             {isAdmin && (
               <button
                 onClick={() => setActiveTab('finance')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all whitespace-nowrap cursor-pointer ${
                   activeTab === 'finance'
                     ? 'bg-slate-900 text-emerald-300 shadow-xs'
                     : 'text-emerald-900 bg-emerald-50/90 hover:bg-emerald-100 border border-emerald-200'
                 }`}
               >
-                <span>💰 Finans & Fiyatlar</span>
+                <span>💰 Finans</span>
               </button>
             )}
           </nav>
 
           {/* Sağ Alan: Aktif Kullanıcı & Ayarlar & Çıkış */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0 relative">
+          <div className="flex items-center gap-1.5 shrink-0 z-30">
             
-            {/* Yönetici Günlük Analiz Butonu */}
-            {isAdmin && onOpenDailyActivity && (
-              <button
-                type="button"
-                onClick={onOpenDailyActivity}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-900 border border-indigo-200/90 rounded-xl text-xs font-black shadow-2xs transition-all cursor-pointer"
-                title="Tüm aramalar, randevular ve işlerin gün gün analiz raporu"
-              >
-                <span>📊 Günlük Analiz</span>
-              </button>
-            )}
-
             {/* Bildirim Çanı & Menüsü (Step 2 - 🔔) */}
             <div className="relative shrink-0" ref={notifMenuRef}>
               <button
@@ -574,14 +572,15 @@ export default function Navbar({
               </button>
             )}
 
-            {/* Çıkış Yap Butonu (Top Bar - iPhone SE'de Garantili Görünür) */}
+            {/* Çıkış Yap Butonu (Her Zaman Görünür) */}
             <button
+              type="button"
               onClick={onLogout}
-              className="p-1.5 sm:px-2.5 sm:py-1.5 text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 rounded-xl transition-all border border-rose-200 cursor-pointer shrink-0 flex items-center gap-1 shadow-2xs active:scale-95"
+              className="px-2.5 py-1.5 text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 rounded-xl transition-all border border-rose-300 cursor-pointer shrink-0 flex items-center gap-1.5 shadow-2xs font-extrabold text-xs active:scale-95"
               title="Hesaptan Çıkış Yap"
             >
-              <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="text-xs font-semibold hidden md:inline">Çıkış</span>
+              <LogOut className="w-4 h-4 text-rose-600 hover:text-white shrink-0" />
+              <span className="font-black text-xs">Çıkış</span>
             </button>
           </div>
 
@@ -591,6 +590,16 @@ export default function Navbar({
       {/* Mobil Alt Navigasyon (Sekmeler Kayar, Çıkış Butonu Sabit Kalır) */}
       <div className="flex md:hidden border-t border-slate-200 bg-slate-50 items-center justify-between">
         <div className="flex-1 flex overflow-x-auto py-1.5 px-2 gap-1.5 items-center scrollbar-none">
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('cockpit')}
+              className={`flex-shrink-0 text-xs px-2.5 py-1.5 rounded-lg font-black transition-colors ${
+                activeTab === 'cockpit' ? 'bg-amber-500 text-slate-950 shadow-xs ring-1 ring-amber-400' : 'bg-amber-50 text-amber-950 border border-amber-200'
+              }`}
+            >
+              👑 Kokpit
+            </button>
+          )}
           {isAdmin && (
             <button
               onClick={() => setActiveTab('finder')}

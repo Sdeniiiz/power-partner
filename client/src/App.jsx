@@ -11,6 +11,7 @@ import TodayRecallsModal from './components/TodayRecallsModal';
 import AssignedLeadsModal from './components/AssignedLeadsModal';
 import DailyActivityModal from './components/DailyActivityModal';
 import FieldRouteView from './components/FieldRouteView';
+import AdminCockpit from './components/AdminCockpit';
 import { getSettings, getLeads, getTeamMembers, getCategories, isFieldStaffRole, isAdminOrManagerRole } from './api';
 
 export default function App() {
@@ -47,7 +48,7 @@ export default function App() {
   useEffect(() => {
     if (authUser) {
       if (authUser.role === 'admin') {
-        setActiveTab('finder');
+        setActiveTab('cockpit');
       } else if (isFieldStaffRole(authUser.role)) {
         setActiveTab('field_route');
       } else {
@@ -130,8 +131,21 @@ export default function App() {
       />
 
       {/* Ana İçerik Alanı */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-6 lg:px-8 py-3.5 sm:py-6 min-w-0 max-w-full overflow-x-hidden">
+      <main className="flex-1 w-full max-w-[1720px] mx-auto px-2 sm:px-4 lg:px-6 py-3.5 sm:py-6 min-w-0 overflow-x-hidden">
         
+        {/* YÖNETİCİ KOKPİTİ: CANLI NABIZ, SOĞUK ARAMA (BAHAR & ASLI), SAHA SATIŞ (YİĞİT), ALARMLAR VE BRİFİNG */}
+        {activeTab === 'cockpit' && isAdmin && (
+          <AdminCockpit
+            authUser={authUser}
+            teamMembers={teamMembers}
+            onOpenLeadInCallQueue={(leadId) => {
+              setFilterNotificationLeadIds([leadId]);
+              setActiveTab('calls');
+            }}
+            onNavigateToTab={(tab) => setActiveTab(tab)}
+          />
+        )}
+
         {/* 1-4. ADIM: İŞLETME BULUCU (GOOGLE MAPS - YALNIZCA ADMİN) */}
         {activeTab === 'finder' && isAdmin && (
           <LeadFinder

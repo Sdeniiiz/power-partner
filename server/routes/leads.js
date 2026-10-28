@@ -734,6 +734,436 @@ router.get('/daily-activity', async (req, res) => {
   }
 });
 
+// ==========================================
+// YÖNETİCİ KOKPİTİ & PERFORMANS MERKEZİ (Admin Cockpit)
+// Bahar & Aslı (Soğuk Arama), Yiğit (Saha Satış), Günlük Nabız, Satılan İşler, Alarmlar ve Brifing
+// ==========================================
+router.get('/admin-cockpit', async (req, res) => {
+  try {
+    const { range = 'today', start_date, end_date } = req.query;
+
+    const now = new Date();
+    const trNow = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    const todayStr = trNow.toISOString().slice(0, 10);
+    const currentHour = String(trNow.getUTCHours()).padStart(2, '0');
+    const currentMin = String(trNow.getUTCMinutes()).padStart(2, '0');
+    const currentTimeStr = `${currentHour}:${currentMin}`;
+
+    let startDate = todayStr;
+    let endDate = todayStr;
+
+    if (start_date && end_date) {
+      startDate = start_date.trim();
+      endDate = end_date.trim();
+    } else if (range === 'yesterday') {
+      const yDate = new Date(trNow.getTime() - 24 * 60 * 60 * 1000);
+      startDate = yDate.toISOString().slice(0, 10);
+      endDate = startDate;
+    } else if (range === 'this_week') {
+      const dayOfWeek = trNow.getUTCDay() === 0 ? 7 : trNow.getUTCDay();
+      const monday = new Date(trNow.getTime() - (dayOfWeek - 1) * 24 * 60 * 60 * 1000);
+      startDate = monday.toISOString().slice(0, 10);
+      endDate = todayStr;
+    } else if (range === 'this_month') {
+      startDate = `${todayStr.slice(0, 7)}-01`;
+      endDate = todayStr;
+    } else if (range === 'all') {
+      startDate = '2020-01-01';
+      endDate = '2099-12-31';
+    }
+
+    // 1. GÜNÜN CANLI NABZI (Bugün Ne Var?)
+    // a) Bugün yapılacak toplam arama sayısı (arama_listesi havuzu + bugüne randevulu geri aramalar)
+    const pendingPoolCountRes = await db.get("SELECT COUNT(*) as count FROM leads WHERE status = 'arama_listesi'");
+    const todayRecallCountRes = await db.get(
+      "SELECT COUNT(*) as count FROM leads WHERE status = 'randevu_arama' AND (recall_date <= ? OR recall_date IS NULL)",
+      todayStr
+    );
+    const todayPendingCallsTotal = (pendingPoolCountRes?.count || 0) + (todayRecallCountRes?.count || 0);
+
+    // b) Ziyaret edilecek işletmeler (Saha randevuları)
+    // 1. Bugün planlanan ziyaretler (2026-10-29)
+    const todayFieldVisitsRes = await db.all(
+      `SELECT id, name, district, address, phone, field_visit_status, field_member_name, visit_date 
+       FROM leads 
+       WHERE status = 'randevu' AND (visit_date LIKE ? OR DATE(visit_date) = ?)
+       ORDER BY visit_date ASC`,
+      `${todayStr}%`, todayStr
+    );
+    const todayFieldVisitsTotal = todayFieldVisitsRes.length;
+    const todayFieldVisitsCompleted = todayFieldVisitsRes.filter(v => v.field_visit_status === 'ziyaret_edildi').length;
+    const todayFieldVisitsPending = todayFieldVisitsTotal - todayFieldVisitsCompleted;
+
+    // 2. Geçmiş günlerden kalan henüz kapatılmamış geciken ziyaret randevuları
+    const overdueFieldVisitsRes = await db.all(
+      `SELECT id, name, district, address, phone, field_visit_status, field_member_name, visit_date 
+       FROM leads 
+       WHERE status = 'randevu' AND (visit_date < ? OR DATE(visit_date) < ?)
+       ORDER BY visit_date DESC`,
+      `${todayStr}T00:00`, todayStr
+    );
+    const overdueFieldVisitsTotal = overdueFieldVisitsRes.length;
+
+    // 3. Seçilen tarih aralığında planlanmış toplam randevular
+    const periodFieldVisitsRes = await db.all(
+      `SELECT id, name, district, address, phone, field_visit_status, field_member_name, visit_date 
+       FROM leads 
+       WHERE status = 'randevu' 
+         AND (
+           (DATE(visit_date) BETWEEN ? AND ?)
+           OR (SUBSTR(visit_date, 1, 10) BETWEEN ? AND ?)
+         )
+       ORDER BY visit_date ASC`,
+      startDate, endDate, startDate, endDate
+    );
+
+    // 4. Sistemdeki toplam aktif randevu havuzu
+    const allActiveRandevuRes = await db.all(
+      `SELECT id, name, district, address, phone, field_visit_status, field_member_name, visit_date 
+       FROM leads 
+       WHERE status = 'randevu'
+       ORDER BY visit_date ASC`
+    );
+
+    // c) Bugün kapanan satış sayısı ve toplam TL ciro
+    const todaySalesLogs = await db.all(
+      "SELECT cl.id, cl.lead_id, cl.caller_name, cl.notes, cl.created_at, l.name as lead_name, l.district FROM call_logs cl JOIN leads l ON cl.lead_id = l.id WHERE cl.outcome IN ('ziyaret_olumlu', 'satis') AND (DATE(cl.created_at, 'localtime') = ? OR cl.created_at LIKE ?)",
+      todayStr, `${todayStr}%`
+    );
+    const todayJobsRes = await db.all(
+      "SELECT id, lead_id, title, sale_price, cost, products, created_at FROM jobs WHERE (DATE(created_at, 'localtime') = ? OR created_at LIKE ?)",
+      todayStr, `${todayStr}%`
+    );
+    const todaySalesTotalTL = todayJobsRes.reduce((sum, j) => sum + (Number(j.sale_price) || 0), 0);
+
+    // 2. SOĞUK ARAMA PERSONEL KARNESİ (Bahar & Aslı Öncelikli)
+    const callLogsInRange = await db.all(
+      `SELECT cl.*, l.name as lead_name, l.district as lead_district, l.phone as lead_phone
+       FROM call_logs cl
+       JOIN leads l ON cl.lead_id = l.id
+       WHERE (
+         (DATE(cl.created_at, 'localtime') BETWEEN ? AND ?)
+         OR (SUBSTR(cl.created_at, 1, 10) BETWEEN ? AND ?)
+       )`,
+      startDate, endDate, startDate, endDate
+    );
+
+    const teamMembersList = await db.all("SELECT id, name, role, color FROM team_members");
+    const coldCallerNamesSet = new Set(
+      teamMembersList
+        .filter(m => /soğuk|soguk|arama|tele/i.test(m.role || ''))
+        .map(m => m.name.toLowerCase().trim())
+    );
+    coldCallerNamesSet.add('bahar');
+    coldCallerNamesSet.add('aslı temür');
+    coldCallerNamesSet.add('asli temur');
+    coldCallerNamesSet.add('aslı');
+
+    const coldCallersMap = {};
+
+    // Bahar, Aslı ve soğuk arama rolündeki üyeleri önceden ekle (günün başında 0 arama olsa bile görünsünler)
+    teamMembersList.forEach(m => {
+      const lower = m.name.toLowerCase().trim();
+      if (coldCallerNamesSet.has(lower)) {
+        coldCallersMap[m.name] = {
+          name: m.name,
+          role: m.role || 'Soğuk Arama',
+          color: m.color || '#0284c7',
+          is_primary: true,
+          total_calls: 0,
+          randevu_count: 0,
+          recall_count: 0,
+          sales_pool_count: 0,
+          unreachable_count: 0,
+          negative_count: 0,
+          positive_total: 0,
+          success_rate: 0
+        };
+      }
+    });
+
+    callLogsInRange.forEach(log => {
+      const rawName = (log.caller_name || 'Bilinmeyen').trim();
+      const lower = rawName.toLowerCase();
+      if (lower.includes('(saha)') || log.outcome === 'ziyaret_notu' || log.outcome === 'ziyaret_olumlu' || log.outcome === 'ziyaret_olumsuz') {
+        return;
+      }
+
+      if (!coldCallersMap[rawName]) {
+        const matchedMember = teamMembersList.find(m => m.name.toLowerCase().trim() === lower);
+        coldCallersMap[rawName] = {
+          name: rawName,
+          role: matchedMember?.role || 'Soğuk Arama',
+          color: matchedMember?.color || '#0284c7',
+          is_primary: coldCallerNamesSet.has(lower),
+          total_calls: 0,
+          randevu_count: 0,
+          recall_count: 0,
+          sales_pool_count: 0,
+          unreachable_count: 0,
+          negative_count: 0,
+          positive_total: 0,
+          success_rate: 0
+        };
+      }
+
+      const entry = coldCallersMap[rawName];
+      entry.total_calls += 1;
+
+      if (log.outcome === 'randevu') {
+        entry.randevu_count += 1;
+        entry.positive_total += 1;
+      } else if (log.outcome === 'randevu_arama') {
+        entry.recall_count += 1;
+        entry.positive_total += 1;
+      } else if (log.outcome === 'satis_havuzu' || log.outcome === 'satis') {
+        entry.sales_pool_count += 1;
+        entry.positive_total += 1;
+      } else if (log.outcome === 'iletisimsiz') {
+        entry.unreachable_count += 1;
+      } else if (log.outcome === 'mutlak_olumsuz') {
+        entry.negative_count += 1;
+      }
+    });
+
+    const coldCallersPerformance = Object.values(coldCallersMap).map(c => {
+      c.success_rate = c.total_calls > 0 ? Math.round((c.positive_total / c.total_calls) * 100) : 0;
+      return c;
+    }).sort((a, b) => b.total_calls - a.total_calls);
+
+    // 3. SAHA SATIŞ PERSONEL KARNESİ (Yiğit Öncelikli)
+    const fieldStaffNamesSet = new Set(
+      teamMembersList
+        .filter(m => /saha/i.test(m.role || ''))
+        .map(m => m.name.toLowerCase().trim())
+    );
+    fieldStaffNamesSet.add('yiğit dalkılıç');
+    fieldStaffNamesSet.add('yigit dalkilic');
+    fieldStaffNamesSet.add('yiğit');
+
+    const fieldStaffMap = {};
+
+    // Yiğit ve saha ekibini önceden ekle (0 ziyaret olsa bile tabloda yer alsın)
+    teamMembersList.forEach(m => {
+      const lower = m.name.toLowerCase().trim();
+      if (fieldStaffNamesSet.has(lower)) {
+        fieldStaffMap[m.name] = {
+          name: m.name,
+          role: m.role || 'Saha Satış',
+          color: m.color || '#16a34a',
+          total_visits: 0,
+          positive_sales: 0,
+          negative_visits: 0,
+          repeat_visits: 0,
+          closing_rate: 0,
+          total_revenue: 0
+        };
+      }
+    });
+
+    callLogsInRange.forEach(log => {
+      const rawName = (log.caller_name || '').trim();
+      const lower = rawName.toLowerCase();
+      const isFieldLog = lower.includes('(saha)') || log.outcome.startsWith('ziyaret_') || fieldStaffNamesSet.has(lower.replace(/\(saha\)/g, '').trim());
+
+      if (!isFieldLog) return;
+
+      const cleanName = rawName.replace(/\(saha\)/gi, '').trim() || 'Yiğit dalkılıç';
+      const cleanLower = cleanName.toLowerCase();
+
+      if (!fieldStaffMap[cleanName]) {
+        const matchedMember = teamMembersList.find(m => m.name.toLowerCase().trim() === cleanLower);
+        fieldStaffMap[cleanName] = {
+          name: cleanName,
+          role: matchedMember?.role || 'Saha Satış',
+          color: matchedMember?.color || '#16a34a',
+          total_visits: 0,
+          positive_sales: 0,
+          negative_visits: 0,
+          repeat_visits: 0,
+          closing_rate: 0,
+          total_revenue: 0
+        };
+      }
+
+      const fEntry = fieldStaffMap[cleanName];
+      fEntry.total_visits += 1;
+
+      if (log.outcome === 'ziyaret_olumlu' || log.outcome === 'satis') {
+        fEntry.positive_sales += 1;
+      } else if (log.outcome === 'ziyaret_olumsuz') {
+        fEntry.negative_visits += 1;
+      } else if (log.outcome === 'tekrar_ziyaret') {
+        fEntry.repeat_visits += 1;
+      }
+    });
+
+    // 4. SAHADA GİDİLEN İŞLERDEN HANGİSİ OLUMLU OLMUŞ, NE SATILMIŞ?
+    const fieldSoldJobs = await db.all(
+      `SELECT 
+         l.id as lead_id,
+         l.name as lead_name,
+         l.district,
+         l.category,
+         l.products as lead_products,
+         l.field_member_name,
+         l.assigned_caller_name,
+         l.call_notes,
+         l.visit_date,
+         l.updated_at,
+         COALESCE(
+           (SELECT GROUP_CONCAT(j.title, ' | ') FROM jobs j WHERE j.lead_id = l.id),
+           l.products
+         ) as sold_services,
+         COALESCE(
+           (SELECT SUM(j.sale_price) FROM jobs j WHERE j.lead_id = l.id),
+           0
+         ) as total_sale_price
+       FROM leads l
+       WHERE (
+         l.status IN ('satis_havuzu', 'satis')
+         OR EXISTS (
+           SELECT 1 FROM call_logs cl 
+           WHERE cl.lead_id = l.id 
+           AND cl.outcome IN ('ziyaret_olumlu', 'satis')
+         )
+       )
+       AND (
+         (DATE(l.updated_at, 'localtime') BETWEEN ? AND ?)
+         OR (SUBSTR(l.updated_at, 1, 10) BETWEEN ? AND ?)
+       )
+       ORDER BY l.updated_at DESC
+       LIMIT 50`,
+      startDate, endDate, startDate, endDate
+    );
+
+    fieldSoldJobs.forEach(job => {
+      const fName = (job.field_member_name || 'Yiğit dalkılıç').trim();
+      if (fieldStaffMap[fName]) {
+        fieldStaffMap[fName].total_revenue += (Number(job.total_sale_price) || 0);
+      }
+    });
+
+    const fieldSalesPerformance = Object.values(fieldStaffMap).map(f => {
+      f.closing_rate = f.total_visits > 0 ? Math.round((f.positive_sales / f.total_visits) * 100) : 0;
+      return f;
+    });
+
+    // 5. KIRMIZI BAYRAKLAR & KAÇAKLAR (Alerts)
+    const overdueRecalls = await db.all(
+      `SELECT id, name, phone, district, recall_date, recall_time, assigned_caller_name, call_notes
+       FROM leads
+       WHERE status = 'randevu_arama'
+       AND (
+         recall_date < ? 
+         OR (recall_date = ? AND recall_time IS NOT NULL AND recall_time < ?)
+         OR (recall_date = ? AND recall_time IS NULL)
+       )
+       ORDER BY recall_date ASC, recall_time ASC
+       LIMIT 25`,
+      todayStr, todayStr, currentTimeStr, todayStr
+    );
+
+    const unreachableRecovery = await db.all(
+      `SELECT id, name, phone, district, call_count, last_called_at, assigned_caller_name
+       FROM leads
+       WHERE status = 'iletisimsiz' AND is_mobile = 1
+       ORDER BY last_called_at DESC
+       LIMIT 25`
+    );
+
+    // 6. GRAFİK VERİLERİ (Charts Data)
+    const outcomeCounts = {
+      randevu: 0,
+      randevu_arama: 0,
+      satis_havuzu: 0,
+      iletisimsiz: 0,
+      mutlak_olumsuz: 0,
+      diger: 0
+    };
+
+    callLogsInRange.forEach(l => {
+      if (outcomeCounts[l.outcome] !== undefined) {
+        outcomeCounts[l.outcome] += 1;
+      } else {
+        outcomeCounts.diger += 1;
+      }
+    });
+
+    // 7. GÜN SONU YÖNETİCİ BRİFİNGİ (Kopyalanabilir Rapor Şablonu)
+    const totalCallsInRange = callLogsInRange.length;
+    const totalRandevuInRange = callLogsInRange.filter(c => c.outcome === 'randevu').length;
+    const totalSalesAmount = fieldSoldJobs.reduce((sum, j) => sum + (Number(j.total_sale_price) || 0), 0);
+
+    let briefingText = `📊 POWERPARTNER YÖNETİCİ RAPORU (${startDate === endDate ? startDate : `${startDate} - ${endDate}`})\n`;
+    briefingText += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    briefingText += `📞 TOPLAM ARAMA: ${totalCallsInRange} adet (${totalRandevuInRange} yüz yüze randevu alındı)\n\n`;
+
+    briefingText += `👩‍💼 SOĞUK ARAMA PERFORMANSI:\n`;
+    coldCallersPerformance.forEach(c => {
+      briefingText += `• ${c.name}: ${c.total_calls} arama | 🤝 ${c.randevu_count} Yüz Yüze Randevu | ⏰ ${c.recall_count} Geri Arama (%${c.success_rate} Başarı)\n`;
+    });
+
+    briefingText += `\n🚗 SAHA SATIŞ (YİĞİT & SAHA EKİBİ):\n`;
+    fieldSalesPerformance.forEach(f => {
+      briefingText += `• ${f.name}: ${f.total_visits} Ziyaret | 🏆 ${f.positive_sales} Kapanan Satış (%${f.closing_rate} Kapama) | 💰 ${f.total_revenue.toLocaleString('tr-TR')} TL Ciro\n`;
+    });
+
+    if (fieldSoldJobs.length > 0) {
+      briefingText += `\n🎉 KAPANAN İŞLER & CİRO (${fieldSoldJobs.length} İşletme - Toplam: ${totalSalesAmount.toLocaleString('tr-TR')} TL):\n`;
+      fieldSoldJobs.slice(0, 5).forEach((j, idx) => {
+        briefingText += `${idx + 1}. ${j.lead_name} (${j.district || 'Samsun'}) → ${j.sold_services || 'Hizmet Paketi'} [${Number(j.total_sale_price || 0).toLocaleString('tr-TR')} TL]\n`;
+      });
+      if (fieldSoldJobs.length > 5) {
+        briefingText += `... ve ${fieldSoldJobs.length - 5} işletme daha.\n`;
+      }
+    }
+
+    if (overdueRecalls.length > 0) {
+      briefingText += `\n⚠️ DİKKAT: ${overdueRecalls.length} adet saati geçen geri arama bekliyor!\n`;
+    }
+    briefingText += `━━━━━━━━━━━━━━━━━━━━━━`;
+
+    res.json({
+      range,
+      start_date: startDate,
+      end_date: endDate,
+      daily_pulse: {
+        today_pending_calls: todayPendingCallsTotal,
+        today_pending_pool: pendingPoolCountRes?.count || 0,
+        today_recalls_due: todayRecallCountRes?.count || 0,
+        today_field_visits_total: todayFieldVisitsTotal,
+        today_field_visits_completed: todayFieldVisitsCompleted,
+        today_field_visits_pending: todayFieldVisitsPending,
+        overdue_field_visits_total: overdueFieldVisitsTotal,
+        period_field_visits_total: periodFieldVisitsRes.length,
+        total_active_field_visits: allActiveRandevuRes.length,
+        today_field_visits_list: todayFieldVisitsRes,
+        overdue_field_visits_list: overdueFieldVisitsRes,
+        period_field_visits_list: periodFieldVisitsRes,
+        today_sales_count: todaySalesLogs.length,
+        today_sales_total_tl: todaySalesTotalTL,
+        red_flags_count: overdueRecalls.length + overdueFieldVisitsTotal
+      },
+      cold_callers_performance: coldCallersPerformance,
+      field_sales_performance: fieldSalesPerformance,
+      field_sold_jobs: fieldSoldJobs,
+      red_flags: {
+        overdue_recalls: overdueRecalls,
+        unreachable_recovery: unreachableRecovery
+      },
+      charts: {
+        outcome_distribution: outcomeCounts,
+        total_calls: totalCallsInRange
+      },
+      daily_briefing: briefingText
+    });
+  } catch (err) {
+    console.error('admin-cockpit error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Yüz yüze randevu (ziyaret) günlük kota ve doluluk takvimi (Maks 10 randevu kuralı)
 router.get('/appointment-capacity', async (req, res) => {
   try {
