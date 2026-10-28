@@ -734,6 +734,175 @@ router.get('/daily-activity', async (req, res) => {
   }
 });
 
+// Yüz yüze randevu (ziyaret) günlük kota ve doluluk takvimi (Maks 10 randevu kuralı)
+router.get('/appointment-capacity', async (req, res) => {
+  try {
+    const { caller_name, days = 14 } = req.query;
+    const numDays = Math.min(60, Math.max(1, Number(days) || 14));
+
+    // Yerel Türkiye saati (GMT+3) için gün hesaplama
+    const now = new Date();
+    const trNow = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    const getLocalYMD = (d) => {
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const todayStr = getLocalYMD(trNow);
+    const tmrwDate = new Date(trNow.getTime() + 24 * 60 * 60 * 1000);
+    const tomorrowStr = getLocalYMD(tmrwDate);
+
+    // 1. Bugün yapılan aramalar ve alınan yüz yüze randevular (toplam ve ilgili personel)
+    const [todayCallsTotalRow, todayCallsCallerRow, todayVisitsTotalRow, todayVisitsCallerRow] = await Promise.all([
+      db.get(
+        `SELECT COUNT(*) as count FROM call_logs WHERE (DATE(created_at, 'localtime') = ? OR created_at LIKE ?)`,
+        todayStr, `${todayStr}%`
+      ),
+      caller_name && caller_name !== 'all'
+        ? db.get(
+            `SELECT COUNT(*) as count FROM call_logs WHERE (DATE(created_at, 'localtime') = ? OR created_at LIKE ?) AND LOWER(TRIM(caller_name)) = LOWER(TRIM(?))`,
+            todayStr, `${todayStr}%`, caller_name.trim()
+          )
+        : Promise.resolve({ count: 0 }),
+      db.get(
+        `SELECT COUNT(*) as count FROM call_logs WHERE outcome = 'randevu' AND (DATE(created_at, 'localtime') = ? OR created_at LIKE ?)`,
+        todayStr, `${todayStr}%`
+      ),
+      caller_name && caller_name !== 'all'
+        ? db.get(
+            `SELECT COUNT(*) as count FROM call_logs WHERE outcome = 'randevu' AND (DATE(created_at, 'localtime') = ? OR created_at LIKE ?) AND LOWER(TRIM(caller_name)) = LOWER(TRIM(?))`,
+            todayStr, `${todayStr}%`, caller_name.trim()
+          )
+        : Promise.resolve({ count: 0 })
+    ]);
+
+    // 2. Önümüzdeki günlerin yüz yüze randevularını çek (status = 'randevu' ve visit_date dolu)
+    const upcomingLeads = await db.all(
+      `SELECT
+         l.id,
+         l.name,
+         l.phone,
+         l.district,
+         l.city,
+         l.address,
+         l.visit_date,
+         l.status,
+         l.field_member_id,
+         l.field_member_name,
+         COALESCE(
+           (SELECT cl.caller_name FROM call_logs cl WHERE cl.lead_id = l.id AND cl.outcome = 'randevu' ORDER BY cl.created_at DESC LIMIT 1),
+           l.assigned_caller_name
+         ) as assigned_caller_name,
+         l.call_notes,
+         SUBSTR(l.visit_date, 1, 10) as visit_day
+       FROM leads l
+       WHERE l.status = 'randevu'
+         AND l.visit_date IS NOT NULL
+         AND TRIM(l.visit_date) != ''
+         AND SUBSTR(l.visit_date, 1, 10) >= ?
+       ORDER BY l.visit_date ASC`,
+      todayStr
+    );
+
+    // Günlük eşleme haritası
+    const dayMap = {};
+    (upcomingLeads || []).forEach(lead => {
+      const day = lead.visit_day;
+      if (!day) return;
+      if (!dayMap[day]) dayMap[day] = [];
+      dayMap[day].push(lead);
+    });
+
+    const DAILY_QUOTA = 20; // 2 saha personeli olduğu için günlük maksimum kota 20 olarak belirlendi
+    const daysList = [];
+    const DAY_NAMES = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+
+    const callerNameClean = caller_name && caller_name !== 'all' ? String(caller_name).trim().toLowerCase() : null;
+    let firstAvailableDate = null;
+
+    for (let i = 0; i < numDays; i++) {
+      const curDate = new Date(trNow.getTime() + i * 24 * 60 * 60 * 1000);
+      const dateStr = getLocalYMD(curDate);
+      const dayName = DAY_NAMES[curDate.getUTCDay()];
+      const appts = dayMap[dateStr] || [];
+      const count = appts.length;
+      const isFull = count >= DAILY_QUOTA;
+
+      let label = dateStr;
+      if (i === 0) label = 'Bugün';
+      else if (i === 1) label = 'Yarın';
+
+      // En erken müsait gün (yarından itibaren dolmamış ilk gün)
+      if (i >= 1 && !firstAvailableDate && !isFull) {
+        firstAvailableDate = dateStr;
+      }
+
+      // Personel bazlı randevu dağılımı ve kullanıcının kendi aldığı randevu sayısı
+      const callerBreakdown = {};
+      let myAppointmentsCount = 0;
+
+      const enrichedAppts = appts.map(a => {
+        const cName = a.assigned_caller_name ? a.assigned_caller_name.trim() : 'Belirtilmedi';
+        callerBreakdown[cName] = (callerBreakdown[cName] || 0) + 1;
+        const isMine = callerNameClean ? String(cName).toLowerCase() === callerNameClean : false;
+        if (isMine) myAppointmentsCount++;
+        return {
+          ...a,
+          caller_name: cName,
+          is_mine: isMine
+        };
+      });
+
+      daysList.push({
+        date: dateStr,
+        day_name: dayName,
+        label,
+        count,
+        caller_count: myAppointmentsCount,
+        caller_breakdown: callerBreakdown,
+        quota: DAILY_QUOTA,
+        remaining_quota: Math.max(0, DAILY_QUOTA - count),
+        is_full: isFull,
+        percent: Math.min(100, Math.round((count / DAILY_QUOTA) * 100)),
+        appointments: enrichedAppts
+      });
+    }
+
+    const tomorrowItem = daysList.find(d => d.date === tomorrowStr) || {
+      date: tomorrowStr,
+      day_name: DAY_NAMES[tmrwDate.getUTCDay()],
+      label: 'Yarın',
+      count: 0,
+      caller_count: 0,
+      caller_breakdown: {},
+      quota: DAILY_QUOTA,
+      remaining_quota: DAILY_QUOTA,
+      is_full: false,
+      percent: 0,
+      appointments: []
+    };
+
+    res.json({
+      success: true,
+      daily_quota: DAILY_QUOTA,
+      today_stats: {
+        date: todayStr,
+        calls_total: todayCallsTotalRow?.count || 0,
+        calls_caller: caller_name && caller_name !== 'all' ? (todayCallsCallerRow?.count || 0) : (todayCallsTotalRow?.count || 0),
+        visit_appointments_total: todayVisitsTotalRow?.count || 0,
+        visit_appointments_caller: caller_name && caller_name !== 'all' ? (todayVisitsCallerRow?.count || 0) : (todayVisitsTotalRow?.count || 0)
+      },
+      tomorrow_stats: tomorrowItem,
+      first_available_date: firstAvailableDate || tomorrowStr,
+      days: daysList
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // İlçe ve Sektör/Kategori filtre seçeneklerini getir (Hızlı Paralel & Önbellekli)
 router.get('/meta/filters', async (req, res) => {
   try {
@@ -1216,6 +1385,25 @@ router.post('/:id/call', async (req, res) => {
       }
 
       formattedNote = `${author} [${dateStr} ${timeStr}]: ${cleanNote}`;
+    }
+
+    // Günlük 20 Yüz Yüze Randevu Kotası Kontrolü (2 Saha Personeli x 10 = 20)
+    if (outcome === 'randevu' && visit_date) {
+      const targetDay = String(visit_date).slice(0, 10);
+      const existingAppts = await db.get(
+        `SELECT COUNT(*) as count FROM leads WHERE status = 'randevu' AND SUBSTR(visit_date, 1, 10) = ? AND id != ?`,
+        targetDay,
+        leadId
+      );
+      const currentCount = existingAppts?.count || 0;
+      if (currentCount >= 20 && !req.body.force_over_quota) {
+        return res.status(400).json({
+          error: `${targetDay} tarihi için 20 yüz yüze randevu kotası dolmuştur (2 saha personeli kapasitesi)! Saha ekibinin randevulara yetişebilmesi için lütfen randevuyu bir sonraki müsait güne veriniz.`,
+          quota_exceeded: true,
+          current_count: currentCount,
+          target_date: targetDay
+        });
+      }
     }
 
     // Arama günlüğü ekle

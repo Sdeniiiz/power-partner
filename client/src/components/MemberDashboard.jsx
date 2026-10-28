@@ -24,7 +24,8 @@ import {
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
 import FieldRouteView from './FieldRouteView';
-import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote, isFieldStaffRole, isAdminOrManagerRole } from '../api';
+import AppointmentCapacityModal from './AppointmentCapacityModal';
+import { getJobs, updateJob, getLeads, recordCall, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote, isFieldStaffRole, isAdminOrManagerRole, getAppointmentCapacity } from '../api';
 
 export default function MemberDashboard({ currentUser, teamMembers = [], authUser, onJobUpdated }) {
   const isAdmin = authUser?.role === 'admin' || isAdminOrManagerRole(authUser?.role);
@@ -62,6 +63,26 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
   const [modalFieldMemberId, setModalFieldMemberId] = useState('');
   const [submittingCall, setSubmittingCall] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
+
+  // Günlük Randevu Kotası & Doluluk Takvimi State
+  const [appointmentCapacity, setAppointmentCapacity] = useState(null);
+  const [showCapacityModal, setShowCapacityModal] = useState(false);
+
+  const loadAppointmentCapacity = async () => {
+    try {
+      const activeCallerName = authUser?.name || activeMember?.name || undefined;
+      const res = await getAppointmentCapacity({ caller_name: activeCallerName });
+      if (res && res.success) {
+        setAppointmentCapacity(res);
+      }
+    } catch (err) {
+      console.error('Randevu kapasitesi alınamadı:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadAppointmentCapacity();
+  }, [activeMember, authUser]);
 
   useEffect(() => {
     if (currentUser) {
@@ -224,6 +245,29 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
       return;
     }
 
+    let visitDateToSubmit = visitDate;
+
+    // Yüz Yüze Randevu (Ziyaret) Günlük 20 Kota Kuralı Kontrolü (2 Saha Personeli)
+    if (outcome === 'randevu' && visitDate) {
+      const selectedDayStr = visitDate.slice(0, 10);
+      const dayCapacity = appointmentCapacity?.days?.find(d => d.date === selectedDayStr);
+      if (dayCapacity && dayCapacity.count >= 20) {
+        const nextAvail = appointmentCapacity?.first_available_date;
+        const confirmOverQuota = confirm(
+          `⚠️ DİKKAT: Seçilen gün (${selectedDayStr}) için 20 yüz yüze randevu kotası DOLMUŞTUR (2 saha personeli kapasitesi)!\n\n` +
+          `Saha ekibinin randevulara yetişebilmesi için randevuyu bir sonraki müsait gün olan ${nextAvail} tarihine aktarmak ister misiniz?\n\n` +
+          `• "Tamam": Randevu ${nextAvail} saat 14:00'e aktarılıp kaydedilecek.\n` +
+          `• "İptal": Randevu tarihi seçimine geri dönülecek.`
+        );
+        if (confirmOverQuota && nextAvail) {
+          visitDateToSubmit = `${nextAvail}T14:00`;
+          setVisitDate(visitDateToSubmit);
+        } else {
+          return;
+        }
+      }
+    }
+
     setSubmittingCall(true);
     try {
       const activeCallerName = authUser?.name || activeMember?.name || 'Personel';
@@ -231,7 +275,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
         outcome,
         notes: callNotes,
         caller_name: activeCallerName,
-        visit_date: visitDate || null,
+        visit_date: visitDateToSubmit || null,
         recall_date: recallDate || null,
         recall_time: recallTime || null,
         score: modalScore || 0,
@@ -246,11 +290,13 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
       setVisitDate('');
       setModalScore(0);
       loadMemberLeads();
+      loadAppointmentCapacity();
       if (onJobUpdated) onJobUpdated();
 
       setTimeout(() => setActionSuccessMsg(''), 4000);
     } catch (err) {
-      alert(`Kayıt hatası: ${err.message}`);
+      const msg = err.response?.data?.error || err.message;
+      alert(`Kayıt hatası: ${msg}`);
     } finally {
       setSubmittingCall(false);
     }
@@ -337,8 +383,77 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
             </div>
           </div>
 
-          {/* Aksiyon Butonları */}
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+          {/* Aksiyon Butonları & Sağ Üst Göstergeler */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-center">
+            {/* 1. Bugün Yapılan Arama Sayısı */}
+            <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl px-3 py-1.5 flex items-center gap-2 shadow-2xs">
+              <span className="text-xs">📞</span>
+              <div>
+                <div className="text-[9px] font-extrabold text-blue-800 uppercase tracking-wider">
+                  Bugün Arama
+                </div>
+                <div className="text-xs font-black text-blue-950 leading-tight">
+                  {appointmentCapacity?.today_stats?.calls_caller ?? 0}
+                  <span className="text-[10px] font-normal text-blue-700/80 ml-1">
+                    (Ekip: {appointmentCapacity?.today_stats?.calls_total ?? 0})
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Bugün Alınan Yüzyüze Randevu Sayısı */}
+            <div className="bg-purple-50/80 border border-purple-200/90 rounded-2xl px-3 py-1.5 flex items-center gap-2 shadow-2xs">
+              <span className="text-xs">🤝</span>
+              <div>
+                <div className="text-[9px] font-extrabold text-purple-800 uppercase tracking-wider">
+                  Yüzyüze Randevu
+                </div>
+                <div className="text-xs font-black text-purple-950 leading-tight">
+                  {appointmentCapacity?.today_stats?.visit_appointments_caller ?? 0}
+                  <span className="text-[10px] font-normal text-purple-700/80 ml-1">
+                    (Ekip: {appointmentCapacity?.today_stats?.visit_appointments_total ?? 0})
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Yarınki Randevu Durumu & Takvim Butonu */}
+            <button
+              type="button"
+              onClick={() => setShowCapacityModal(true)}
+              className={`rounded-2xl px-3 py-1.5 flex items-center gap-2 border transition-all cursor-pointer shadow-2xs ${
+                appointmentCapacity?.tomorrow_stats?.is_full
+                  ? 'bg-rose-50 border-rose-300 hover:bg-rose-100 ring-2 ring-rose-400/40 animate-pulse'
+                  : (appointmentCapacity?.tomorrow_stats?.count || 0) >= 15
+                  ? 'bg-amber-50 border-amber-300 hover:bg-amber-100'
+                  : 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100'
+              }`}
+              title="Günlük randevu kontenjanlarını ve 14 günlük takvimi inceleyin (Maks. 20 randevu/gün)"
+            >
+              <span className="text-xs">📅</span>
+              <div className="text-left">
+                <div className="text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <span>Yarın:</span>
+                  <span className={appointmentCapacity?.tomorrow_stats?.is_full ? 'text-rose-700' : 'text-slate-800'}>
+                    {appointmentCapacity?.tomorrow_stats?.count ?? 0}/20
+                  </span>
+                  {appointmentCapacity?.tomorrow_stats?.caller_count !== undefined && (
+                    <span className="text-[9px] text-purple-700 font-bold lowercase">
+                      (Sizin: {appointmentCapacity.tomorrow_stats.caller_count})
+                    </span>
+                  )}
+                  {appointmentCapacity?.tomorrow_stats?.is_full && (
+                    <span className="bg-rose-600 text-white text-[8px] font-black px-1 rounded">
+                      DOLU
+                    </span>
+                  )}
+                </div>
+                <div className="text-[9px] font-extrabold text-indigo-700 hover:underline">
+                  Takvim →
+                </div>
+              </div>
+            </button>
+
             {viewMode === 'jobs' && activeJobs.some(j => j.due_date) && (
               <button
                 type="button"
@@ -1270,16 +1385,116 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
             {/* 2. Ziyaret Randevusu & Otomatik Saha Personeli Paslama (Yüz Yüze Ziyaret İçin) */}
             <div className="mt-3 bg-purple-50/70 border border-purple-200 rounded-2xl p-3 space-y-2.5">
               <div>
-                <label className="block text-xs font-bold text-purple-950 mb-1 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-purple-600" />
-                  <span>Yüz Yüze Ziyaret Tarihi & Saati:</span>
-                </label>
+                <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
+                  <label className="text-xs font-bold text-purple-950 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Yüz Yüze Ziyaret Tarihi & Saati (Maks. 20 Randevu / Gün):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowCapacityModal(true)}
+                    className="text-[10px] font-extrabold text-purple-700 bg-purple-100 hover:bg-purple-200 px-2 py-0.5 rounded-lg border border-purple-300 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <span>📅 Randevu Doluluk Takvimi</span>
+                  </button>
+                </div>
+
                 <input
                   type="datetime-local"
                   value={visitDate}
                   onChange={(e) => setVisitDate(e.target.value)}
                   className="w-full text-xs bg-white border border-purple-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-800"
                 />
+
+                {/* Hızlı Gün Seçimi ve Doluluk Çubuğu */}
+                {appointmentCapacity?.days && appointmentCapacity.days.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                      <span>⚡ Hızlı Randevu Günleri:</span>
+                      <span className="text-[10px] font-normal text-purple-700">
+                        {appointmentCapacity.tomorrow_stats?.is_full ? '⚠️ Yarın Dolu' : '✅ Yarın Müsait'}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {appointmentCapacity.days.slice(0, 5).map((d) => {
+                        const isDayFull = d.is_full;
+                        const isDaySelected = visitDate && visitDate.slice(0, 10) === d.date;
+
+                        return (
+                          <button
+                            key={d.date}
+                            type="button"
+                            onClick={() => setVisitDate(`${d.date}T14:00`)}
+                            className={`text-[10px] font-black px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                              isDaySelected
+                                ? 'bg-purple-600 text-white border-purple-700 shadow-2xs'
+                                : isDayFull
+                                ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                                : d.count >= 15
+                                ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-purple-50'
+                            }`}
+                            title={`${d.date} (${d.day_name}): Toplam ${d.count}/20 randevu (Sizin: ${d.caller_count || 0})`}
+                          >
+                            <span>
+                              {d.label === 'Bugün' ? 'Bugün' : d.label === 'Yarın' ? 'Yarın' : d.date.slice(5)}
+                            </span>
+                            <span
+                              className={`text-[9px] px-1 py-0.2 rounded font-extrabold ${
+                                isDaySelected
+                                  ? 'bg-white/20 text-white'
+                                  : isDayFull
+                                  ? 'bg-rose-200 text-rose-900'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {isDayFull ? 'DOLU' : `${d.count}/20`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Seçilen Tarihin Doluluk Uyarısı */}
+                {(() => {
+                  if (!visitDate) return null;
+                  const selectedDayStr = visitDate.slice(0, 10);
+                  const matchedDay = appointmentCapacity?.days?.find(d => d.date === selectedDayStr);
+                  if (!matchedDay) return null;
+
+                  if (matchedDay.is_full) {
+                    return (
+                      <div className="mt-2.5 bg-rose-50 border border-rose-300 rounded-xl p-2.5 text-xs text-rose-900 space-y-1.5 animate-pulse">
+                        <div className="flex items-center gap-1.5 font-black text-rose-700">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                          <span>DİKKAT: {selectedDayStr} Günü İçin 20 Randevu Kotası Dolmuştur!</span>
+                        </div>
+                        <p className="text-[11px] text-rose-800 leading-relaxed">
+                          Saha ekibinin randevulara zamanında yetişebilmesi için kural gereği randevunun bir sonraki müsait güne alınması zorunludur.
+                        </p>
+                        {appointmentCapacity?.first_available_date && (
+                          <button
+                            type="button"
+                            onClick={() => setVisitDate(`${appointmentCapacity.first_available_date}T14:00`)}
+                            className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <span>👉 Bir Sonraki Müsait Güne Al ({appointmentCapacity.first_available_date} 14:00)</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="mt-2 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center justify-between">
+                      <span>✓ {selectedDayStr} günü müsait ({matchedDay.count}/20 randevu alındı {matchedDay.caller_count ? `• Sizin: ${matchedDay.caller_count}` : ''})</span>
+                      <span className="font-extrabold">Kalan: {matchedDay.remaining_quota}</span>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -1372,6 +1587,18 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
           </div>
         </div>
       )}
+
+      {/* Yüz Yüze Randevu Doluluk & Kota Takvimi Modalı (Maks. 20 Randevu / Gün) */}
+      <AppointmentCapacityModal
+        isOpen={showCapacityModal}
+        onClose={() => setShowCapacityModal(false)}
+        capacityData={appointmentCapacity}
+        selectedVisitDate={visitDate}
+        onSelectDate={(newVisitDt) => {
+          setVisitDate(newVisitDt);
+          setShowCapacityModal(false);
+        }}
+      />
 
     </div>
   );
