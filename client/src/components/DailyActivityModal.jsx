@@ -147,8 +147,11 @@ export default function DailyActivityModal({
       case 'satis_havuzu':
       case 'satis':
         return <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-md">🎉 Satış / Hizmet</span>;
+      case 'whatsapp_bilgi':
+        return <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-md">💬 WhatsApp Bilgi</span>;
+      case 'konusulmadi':
       case 'iletisimsiz':
-        return <span className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2 py-0.5 rounded-md">📵 İletişimsiz</span>;
+        return <span className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2 py-0.5 rounded-md">📵 Konuşulmadı</span>;
       case 'mutlak_olumsuz':
         return <span className="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-md">❌ Olumsuz</span>;
       default:

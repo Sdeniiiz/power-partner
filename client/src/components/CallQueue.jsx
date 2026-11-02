@@ -2027,34 +2027,47 @@ export default function CallQueue({
                   <span>🗓️ Randevu (Yüz Yüze Ziyaret)</span>
                 </button>
 
-                {/* 3. Doğrudan Satış -> Satış Havuzu */}
+                {/* 3. WhatsApp'tan Bilgi İstedi */}
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => handleOutcomeSubmit('whatsapp_bilgi')}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer border border-emerald-500"
+                  title="Müşteri WhatsApp üzerinden bilgi ve teklif istedi"
+                >
+                  <MessageSquare className="w-4 h-4 text-emerald-100" />
+                  <span>💬 WhatsApp'tan Bilgi İstedi</span>
+                </button>
+
+                {/* 4. Doğrudan Satış -> Satış Havuzu */}
                 <button
                   type="button"
                   disabled={submitting}
                   onClick={() => handleOutcomeSubmit('satis')}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  <span>🤝 Satış Yapıldı (Satış Havuzuna)</span>
+                  <span>🤝 Satış Yapıldı (Satış Havuzu)</span>
                 </button>
 
-                {/* 4. İletişimsiz Telefon -> Tüm İletişimsizlikler */}
+                {/* 5. Konuşulmadı (İletişim Kurulamadı) */}
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={() => handleOutcomeSubmit('iletisimsiz')}
+                  onClick={() => handleOutcomeSubmit('konusulmadi')}
                   className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  title="Hiçbir iletişim kurulamadı, çaldı açmadı veya ulaşılamadı"
                 >
                   <PhoneOff className="w-4 h-4" />
-                  <span>📵 Ulaşılamadı (İletişimsizler)</span>
+                  <span>📵 Konuşulmadı (Ulaşılamadı)</span>
                 </button>
 
-                {/* 5. Mutlak Olumsuz -> Süreç Sonu */}
+                {/* 6. Mutlak Olumsuz -> Süreç Sonu */}
                 <button
                   type="button"
                   disabled={submitting}
                   onClick={() => handleOutcomeSubmit('mutlak_olumsuz')}
-                  className="col-span-1 sm:col-span-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-2.5 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <XCircle className="w-4 h-4" />
                   <span>❌ Mutlak Olumsuz (İptal)</span>

@@ -1548,34 +1548,47 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                   <span>🗓️ Randevu (Yüz Yüze Ziyaret)</span>
                 </button>
 
-                {/* 3. Satış Yapıldı */}
+                {/* 3. WhatsApp'tan Bilgi İstedi */}
+                <button
+                  type="button"
+                  disabled={submittingCall}
+                  onClick={() => handleCallOutcomeSubmit('whatsapp_bilgi')}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer border border-emerald-500"
+                  title="Müşteri WhatsApp üzerinden bilgi ve teklif istedi"
+                >
+                  <MessageSquare className="w-4 h-4 text-emerald-100" />
+                  <span>💬 WhatsApp'tan Bilgi İstedi</span>
+                </button>
+
+                {/* 4. Satış Yapıldı */}
                 <button
                   type="button"
                   disabled={submittingCall}
                   onClick={() => handleCallOutcomeSubmit('satis')}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <CheckCircle className="w-4 h-4" />
                   <span>🤝 Satış Yapıldı</span>
                 </button>
 
-                {/* 4. Ulaşılamadı */}
+                {/* 5. Konuşulmadı (Ulaşılamadı) */}
                 <button
                   type="button"
                   disabled={submittingCall}
-                  onClick={() => handleCallOutcomeSubmit('iletisimsiz')}
+                  onClick={() => handleCallOutcomeSubmit('konusulmadi')}
                   className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  title="Hiçbir iletişim kurulamadı, çaldı açmadı veya ulaşılamadı"
                 >
                   <PhoneOff className="w-4 h-4" />
-                  <span>📵 Ulaşılamadı</span>
+                  <span>📵 Konuşulmadı (Ulaşılamadı)</span>
                 </button>
 
-                {/* 5. Mutlak Olumsuz */}
+                {/* 6. Mutlak Olumsuz */}
                 <button
                   type="button"
                   disabled={submittingCall}
                   onClick={() => handleCallOutcomeSubmit('mutlak_olumsuz')}
-                  className="col-span-1 sm:col-span-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-2.5 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                 >
                   <XCircle className="w-4 h-4" />
                   <span>❌ Mutlak Olumsuz (İptal)</span>

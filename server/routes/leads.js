@@ -773,7 +773,16 @@ router.get('/admin-cockpit', async (req, res) => {
     }
 
     // 1. GÜNÜN CANLI NABZI (Bugün Ne Var?)
-    // a) Bugün yapılacak toplam arama sayısı (arama_listesi havuzu + bugüne randevulu geri aramalar)
+    // a) Bugün yapılmış olan aramalar (Personel bazında ve ekip toplamı)
+    const todayCallsLogs = await db.all(
+      `SELECT cl.caller_name, cl.outcome
+       FROM call_logs cl
+       WHERE (DATE(cl.created_at, 'localtime') = ? OR cl.created_at LIKE ?)
+         AND LOWER(cl.caller_name) NOT LIKE '%(saha)%'
+         AND cl.outcome NOT IN ('ziyaret_notu', 'ziyaret_olumlu', 'ziyaret_olumsuz')`,
+      todayStr, `${todayStr}%`
+    );
+
     const pendingPoolCountRes = await db.get("SELECT COUNT(*) as count FROM leads WHERE status = 'arama_listesi'");
     const todayRecallCountRes = await db.get(
       "SELECT COUNT(*) as count FROM leads WHERE status = 'randevu_arama' AND (recall_date <= ? OR recall_date IS NULL)",
@@ -861,6 +870,33 @@ router.get('/admin-cockpit', async (req, res) => {
 
     const coldCallersMap = {};
 
+    // Bugün yapılan aramaların personel bazında dağılımı (Bahar, Aslı vb.)
+    const todayCallerCounts = {};
+    teamMembersList.forEach(m => {
+      const lower = m.name.toLowerCase().trim();
+      if (coldCallerNamesSet.has(lower)) {
+        todayCallerCounts[m.name] = { name: m.name, role: m.role || 'Soğuk Arama', color: m.color || '#0284c7', count: 0, konusulmadi: 0, whatsapp: 0, randevu: 0 };
+      }
+    });
+
+    todayCallsLogs.forEach(log => {
+      const rawName = (log.caller_name || 'Bilinmeyen').trim();
+      if (!todayCallerCounts[rawName]) {
+        todayCallerCounts[rawName] = { name: rawName, role: 'Soğuk Arama', color: '#0284c7', count: 0, konusulmadi: 0, whatsapp: 0, randevu: 0 };
+      }
+      todayCallerCounts[rawName].count += 1;
+      if (log.outcome === 'konusulmadi' || log.outcome === 'iletisimsiz') {
+        todayCallerCounts[rawName].konusulmadi += 1;
+      } else if (log.outcome === 'whatsapp_bilgi') {
+        todayCallerCounts[rawName].whatsapp += 1;
+      } else if (log.outcome === 'randevu') {
+        todayCallerCounts[rawName].randevu += 1;
+      }
+    });
+
+    const todayCompletedCallsList = Object.values(todayCallerCounts).sort((a, b) => b.count - a.count);
+    const todayCompletedCallsTotal = todayCallsLogs.length;
+
     // Bahar, Aslı ve soğuk arama rolündeki üyeleri önceden ekle (günün başında 0 arama olsa bile görünsünler)
     teamMembersList.forEach(m => {
       const lower = m.name.toLowerCase().trim();
@@ -873,6 +909,8 @@ router.get('/admin-cockpit', async (req, res) => {
           total_calls: 0,
           randevu_count: 0,
           recall_count: 0,
+          whatsapp_count: 0,
+          konusulmadi_count: 0,
           sales_pool_count: 0,
           unreachable_count: 0,
           negative_count: 0,
@@ -899,6 +937,8 @@ router.get('/admin-cockpit', async (req, res) => {
           total_calls: 0,
           randevu_count: 0,
           recall_count: 0,
+          whatsapp_count: 0,
+          konusulmadi_count: 0,
           sales_pool_count: 0,
           unreachable_count: 0,
           negative_count: 0,
@@ -916,10 +956,14 @@ router.get('/admin-cockpit', async (req, res) => {
       } else if (log.outcome === 'randevu_arama') {
         entry.recall_count += 1;
         entry.positive_total += 1;
+      } else if (log.outcome === 'whatsapp_bilgi') {
+        entry.whatsapp_count += 1;
+        entry.positive_total += 1;
       } else if (log.outcome === 'satis_havuzu' || log.outcome === 'satis') {
         entry.sales_pool_count += 1;
         entry.positive_total += 1;
-      } else if (log.outcome === 'iletisimsiz') {
+      } else if (log.outcome === 'konusulmadi' || log.outcome === 'iletisimsiz') {
+        entry.konusulmadi_count += 1;
         entry.unreachable_count += 1;
       } else if (log.outcome === 'mutlak_olumsuz') {
         entry.negative_count += 1;
@@ -1076,14 +1120,17 @@ router.get('/admin-cockpit', async (req, res) => {
     const outcomeCounts = {
       randevu: 0,
       randevu_arama: 0,
+      whatsapp_bilgi: 0,
+      konusulmadi: 0,
       satis_havuzu: 0,
-      iletisimsiz: 0,
       mutlak_olumsuz: 0,
       diger: 0
     };
 
     callLogsInRange.forEach(l => {
-      if (outcomeCounts[l.outcome] !== undefined) {
+      if (l.outcome === 'konusulmadi' || l.outcome === 'iletisimsiz') {
+        outcomeCounts.konusulmadi += 1;
+      } else if (outcomeCounts[l.outcome] !== undefined) {
         outcomeCounts[l.outcome] += 1;
       } else {
         outcomeCounts.diger += 1;
@@ -1101,7 +1148,9 @@ router.get('/admin-cockpit', async (req, res) => {
 
     briefingText += `👩‍💼 SOĞUK ARAMA PERFORMANSI:\n`;
     coldCallersPerformance.forEach(c => {
-      briefingText += `• ${c.name}: ${c.total_calls} arama | 🤝 ${c.randevu_count} Yüz Yüze Randevu | ⏰ ${c.recall_count} Geri Arama (%${c.success_rate} Başarı)\n`;
+      const waPart = c.whatsapp_count > 0 ? ` | 💬 ${c.whatsapp_count} WhatsApp` : '';
+      const noTalkPart = c.konusulmadi_count > 0 ? ` | 📵 ${c.konusulmadi_count} Konuşulmadı` : '';
+      briefingText += `• ${c.name}: ${c.total_calls} arama | 🤝 ${c.randevu_count} Randevu${waPart}${noTalkPart} (%${c.success_rate} Başarı)\n`;
     });
 
     briefingText += `\n🚗 SAHA SATIŞ (YİĞİT & SAHA EKİBİ):\n`;
@@ -1129,6 +1178,8 @@ router.get('/admin-cockpit', async (req, res) => {
       start_date: startDate,
       end_date: endDate,
       daily_pulse: {
+        today_completed_calls_total: todayCompletedCallsTotal,
+        today_completed_calls_list: todayCompletedCallsList,
         today_pending_calls: todayPendingCallsTotal,
         today_pending_pool: pendingPoolCountRes?.count || 0,
         today_recalls_due: todayRecallCountRes?.count || 0,
@@ -1558,36 +1609,50 @@ router.get('/field-route', async (req, res) => {
     }
 
     let query = `
-      SELECT * FROM leads 
-      WHERE (status = 'randevu' OR field_member_id IS NOT NULL)
+      SELECT l.*,
+        COALESCE(
+          (SELECT SUBSTR(cl.created_at, 1, 10) 
+           FROM call_logs cl 
+           WHERE cl.lead_id = l.id 
+             AND (cl.outcome LIKE 'ziyaret%' OR cl.outcome = 'satis' OR cl.caller_name LIKE '%Yiğit%' OR cl.caller_name LIKE '%Saha%') 
+           ORDER BY cl.id DESC LIMIT 1),
+          CASE 
+            WHEN l.last_called_at IS NOT NULL AND length(l.last_called_at) >= 10 THEN SUBSTR(l.last_called_at, 1, 10)
+            WHEN l.updated_at IS NOT NULL AND length(l.updated_at) >= 10 THEN SUBSTR(l.updated_at, 1, 10)
+            WHEN l.visit_date IS NOT NULL AND length(l.visit_date) >= 10 THEN SUBSTR(l.visit_date, 1, 10)
+            ELSE NULL
+          END
+        ) as completed_date
+      FROM leads l 
+      WHERE (l.status = 'randevu' OR l.field_member_id IS NOT NULL)
     `;
     const params = [];
 
     if (field_member_id && field_member_id !== 'all') {
-      query += ' AND field_member_id = ?';
+      query += ' AND l.field_member_id = ?';
       params.push(Number(field_member_id));
     }
 
     if (district && district !== 'all' && district !== '') {
-      query += ' AND district = ?';
+      query += ' AND l.district = ?';
       params.push(district);
     }
 
     if (visit_status && visit_status !== 'all') {
       if (visit_status === 'bekliyor') {
-        query += " AND (status = 'randevu' AND COALESCE(field_visit_status, 'bekliyor') = 'bekliyor')";
+        query += " AND (l.status = 'randevu' AND COALESCE(l.field_visit_status, 'bekliyor') = 'bekliyor')";
       } else if (visit_status === 'tamamlandi') {
-        query += " AND (field_visit_status = 'ziyaret_edildi' OR status IN ('satis_havuzu', 'is_dagitildi'))";
+        query += " AND (l.field_visit_status = 'ziyaret_edildi' OR l.status IN ('satis_havuzu', 'is_dagitildi'))";
       }
     }
 
     query += `
       ORDER BY 
-        CASE WHEN status = 'randevu' AND COALESCE(field_visit_status, 'bekliyor') = 'bekliyor' THEN 0 ELSE 1 END ASC,
-        COALESCE(field_route_order, 9999) ASC,
-        CASE WHEN visit_date IS NULL OR visit_date = '' THEN 1 ELSE 0 END ASC,
-        visit_date ASC,
-        id DESC
+        CASE WHEN l.status = 'randevu' AND COALESCE(l.field_visit_status, 'bekliyor') = 'bekliyor' THEN 0 ELSE 1 END ASC,
+        COALESCE(l.field_route_order, 9999) ASC,
+        CASE WHEN l.visit_date IS NULL OR l.visit_date = '' THEN 1 ELSE 0 END ASC,
+        l.visit_date ASC,
+        l.id DESC
     `;
 
     const rows = await db.all(query, ...params);
@@ -1596,12 +1661,21 @@ router.get('/field-route', async (req, res) => {
     const pendingList = rows.filter(r => r.status === 'randevu' && (r.field_visit_status || 'bekliyor') === 'bekliyor');
     const completedList = rows.filter(r => !(r.status === 'randevu' && (r.field_visit_status || 'bekliyor') === 'bekliyor'));
 
+    // Günlük tamamlanan ziyaret sayıları sözlüğü (Takvim ve filtreler için)
+    const daily_completed_counts = {};
+    for (const r of completedList) {
+      if (r.completed_date) {
+        daily_completed_counts[r.completed_date] = (daily_completed_counts[r.completed_date] || 0) + 1;
+      }
+    }
+
     const districts = Array.from(new Set(rows.map(r => r.district).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr'));
 
     res.json({
       data: rows,
       pending: pendingList,
       completed: completedList,
+      daily_completed_counts,
       districts,
       stats: {
         total: rows.length,
@@ -1781,7 +1855,8 @@ router.post('/:id/call', async (req, res) => {
 
     let newStatus = lead.status;
     if (outcome === 'mutlak_olumsuz') newStatus = 'mutlak_olumsuz';
-    else if (outcome === 'iletisimsiz') newStatus = 'iletisimsiz';
+    else if (outcome === 'iletisimsiz' || outcome === 'konusulmadi') newStatus = 'iletisimsiz';
+    else if (outcome === 'whatsapp_bilgi') newStatus = 'randevu_arama'; // WhatsApp'tan bilgi isteyenler takipte
     else if (outcome === 'randevu') newStatus = 'randevu';
     else if (outcome === 'randevu_arama') newStatus = 'randevu_arama'; // ⭐ Arama Randevusu
     else if (outcome === 'ziyaret_olumlu') newStatus = 'satis_havuzu';
@@ -1803,9 +1878,19 @@ router.post('/:id/call', async (req, res) => {
       timeZone: 'Europe/Istanbul'
     });
 
+    // Otomatik veya kullanıcının girdiği not
+    let rawNote = (notes || '').trim();
+    if (!rawNote) {
+      if (outcome === 'whatsapp_bilgi') {
+        rawNote = 'WhatsApp üzerinden detaylı bilgi ve teklif istedi.';
+      } else if (outcome === 'konusulmadi') {
+        rawNote = 'Konuşulmadı / Ulaşılamadı.';
+      }
+    }
+
     let formattedNote = '';
-    if (notes && notes.trim()) {
-      let cleanNote = notes.trim();
+    if (rawNote) {
+      let cleanNote = rawNote;
       // Eğer kullanıcı veya arayüz zaten "Yazar: " veya "Yazar [tarih]: " eklediyse temizle
       const existingPrefixMatch = cleanNote.match(/^([^\[:]+?)(?:\s*\[[^\]]+\])?\s*:\s*(.*)$/);
       if (existingPrefixMatch && existingPrefixMatch[1].trim().toLowerCase() === author.toLowerCase()) {
@@ -1898,6 +1983,10 @@ router.post('/:id/call', async (req, res) => {
 
     // Lead'i güncelle
     const productsStr = products ? (typeof products === 'string' ? products : JSON.stringify(products)) : null;
+    let finalRecallDate = recall_date;
+    if (outcome === 'whatsapp_bilgi' && !finalRecallDate) {
+      finalRecallDate = new Date().toISOString().slice(0, 10);
+    }
 
     await db.run(`
       UPDATE leads
@@ -1922,7 +2011,7 @@ router.post('/:id/call', async (req, res) => {
       newStatus, 
       newCallNotes || lead.call_notes || null, 
       visit_date || null, visit_date || null,
-      recall_date || null, recall_date || null,
+      finalRecallDate || null, finalRecallDate || null,
       recall_time || null, recall_time || null,
       score !== undefined ? Number(score) : null, score !== undefined ? Number(score) : null,
       retry_date || null, retry_date || null,

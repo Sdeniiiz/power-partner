@@ -74,6 +74,8 @@ export default function AdminCockpit({
   };
 
   const pulse = data?.daily_pulse || {
+    today_completed_calls_total: 0,
+    today_completed_calls_list: [],
     today_pending_calls: 0,
     today_pending_pool: 0,
     today_recalls_due: 0,
@@ -187,12 +189,12 @@ export default function AdminCockpit({
       {/* 2. GÜNÜN CANLI NABZI (4 BÜYÜK KPI KARTI) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         
-        {/* KPI 1: Bugün Yapılacak Arama Sayısı */}
+        {/* KPI 1: Yapılan Arama Sayısı (Personel Bazlı ve Toplam) */}
         <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs relative overflow-hidden group hover:border-blue-300 transition-all">
           <div className="absolute top-0 left-0 h-1.5 w-full bg-gradient-to-r from-blue-500 to-indigo-600"></div>
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
-              📞 Bugün Yapılacak Arama
+              {range === 'today' ? '📞 Bugün Yapılan Arama' : `📞 Yapılan Aramalar (${range === 'this_month' ? 'Bu Ay' : range === 'this_week' ? 'Bu Hafta' : range === 'yesterday' ? 'Dün' : 'Tümü'})`}
             </span>
             <div className="p-2 bg-blue-50 text-blue-600 rounded-2xl group-hover:scale-110 transition-transform">
               <PhoneCall className="w-4 h-4" />
@@ -200,13 +202,43 @@ export default function AdminCockpit({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl sm:text-3xl font-black text-slate-900">
-              {pulse.today_pending_calls.toLocaleString('tr-TR')}
+              {range === 'today' ? (pulse.today_completed_calls_total || 0).toLocaleString('tr-TR') : totalCalls.toLocaleString('tr-TR')}
             </span>
-            <span className="text-xs text-slate-500 font-semibold">işletme</span>
+            <span className="text-xs text-slate-500 font-semibold">arama yapıldı</span>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold text-slate-600">
-            <span>Kuyrukta: <strong className="text-blue-700">{pulse.today_pending_pool}</strong></span>
-            <span>Randevulu: <strong className="text-amber-700">{pulse.today_recalls_due}</strong></span>
+
+          {/* Personel Bazında Yapılan Arama Sayıları */}
+          <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-1.5">
+            <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+              {range === 'today' ? 'Bugün Personel Dağılımı:' : 'Dönem İçi Dağılım:'}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {range === 'today' ? (
+                pulse.today_completed_calls_list && pulse.today_completed_calls_list.length > 0 ? (
+                  pulse.today_completed_calls_list.map(c => (
+                    <span
+                      key={c.name}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-900 border border-blue-200 text-xs font-bold"
+                    >
+                      <span className="capitalize">{c.name}:</span>
+                      <strong className="text-blue-700 font-black">{c.count}</strong>
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[11px] text-slate-400 font-medium">Bugün henüz arama yapılmadı.</span>
+                )
+              ) : (
+                coldCallers.map(c => (
+                  <span
+                    key={c.name}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-900 border border-blue-200 text-xs font-bold"
+                  >
+                    <span className="capitalize">{c.name}:</span>
+                    <strong className="text-blue-700 font-black">{c.total_calls}</strong>
+                  </span>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
@@ -409,7 +441,7 @@ export default function AdminCockpit({
                   </div>
 
                   {/* Detay Metrikler */}
-                  <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-200/80 text-center">
+                  <div className="grid grid-cols-5 gap-1.5 pt-2 border-t border-slate-200/80 text-center">
                     <div className="bg-white/80 rounded-xl p-1.5 border border-slate-200/60">
                       <span className="text-[10px] text-purple-700 font-bold block">🤝 Yüz Yüze</span>
                       <strong className="text-xs font-black text-purple-950">{caller.randevu_count}</strong>
@@ -419,8 +451,12 @@ export default function AdminCockpit({
                       <strong className="text-xs font-black text-amber-950">{caller.recall_count}</strong>
                     </div>
                     <div className="bg-white/80 rounded-xl p-1.5 border border-slate-200/60">
-                      <span className="text-[10px] text-orange-700 font-bold block">📵 İletişimsiz</span>
-                      <strong className="text-xs font-black text-orange-950">{caller.unreachable_count}</strong>
+                      <span className="text-[10px] text-emerald-700 font-bold block">💬 WhatsApp</span>
+                      <strong className="text-xs font-black text-emerald-950">{caller.whatsapp_count || 0}</strong>
+                    </div>
+                    <div className="bg-white/80 rounded-xl p-1.5 border border-slate-200/60">
+                      <span className="text-[10px] text-orange-700 font-bold block">📵 Konuşulmadı</span>
+                      <strong className="text-xs font-black text-orange-950">{caller.konusulmadi_count ?? caller.unreachable_count ?? 0}</strong>
                     </div>
                     <div className="bg-white/80 rounded-xl p-1.5 border border-slate-200/60">
                       <span className="text-[10px] text-rose-700 font-bold block">❌ Olumsuz</span>
@@ -511,8 +547,9 @@ export default function AdminCockpit({
                   {[
                     { label: '🤝 Yüz Yüze Randevu (Saha)', count: outcomeDist.randevu || 0, color: 'bg-purple-600', textColor: 'text-purple-700' },
                     { label: '⏰ Arama Randevusu (Geri Ara)', count: outcomeDist.randevu_arama || 0, color: 'bg-amber-500', textColor: 'text-amber-700' },
+                    { label: '💬 WhatsApp Bilgi İstendi', count: outcomeDist.whatsapp_bilgi || 0, color: 'bg-teal-600', textColor: 'text-teal-700' },
                     { label: '🎉 Satış / Satış Havuzu', count: outcomeDist.satis_havuzu || 0, color: 'bg-emerald-600', textColor: 'text-emerald-700' },
-                    { label: '📵 İletişimsiz (Ulaşılamadı)', count: outcomeDist.iletisimsiz || 0, color: 'bg-orange-500', textColor: 'text-orange-700' },
+                    { label: '📵 Konuşulmadı (Ulaşılamadı)', count: outcomeDist.konusulmadi || 0, color: 'bg-orange-500', textColor: 'text-orange-700' },
                     { label: '❌ Mutlak Olumsuz', count: outcomeDist.mutlak_olumsuz || 0, color: 'bg-rose-500', textColor: 'text-rose-700' },
                   ].map(item => {
                     const percent = totalCalls > 0 ? Math.round((item.count / totalCalls) * 100) : 0;
@@ -642,8 +679,9 @@ export default function AdminCockpit({
                     <th className="py-3 px-3.5 text-center">Toplam Arama</th>
                     <th className="py-3 px-3.5 text-center">🤝 Yüz Yüze Randevu</th>
                     <th className="py-3 px-3.5 text-center">⏰ Geri Arama</th>
+                    <th className="py-3 px-3.5 text-center">💬 WhatsApp Bilgi</th>
+                    <th className="py-3 px-3.5 text-center">📵 Konuşulmadı</th>
                     <th className="py-3 px-3.5 text-center">🎉 Satış Havuzu</th>
-                    <th className="py-3 px-3.5 text-center">📵 İletişimsiz</th>
                     <th className="py-3 px-3.5 text-center">❌ Olumsuz</th>
                     <th className="py-3 px-3.5 text-right">Başarı Oranı</th>
                   </tr>
@@ -680,11 +718,18 @@ export default function AdminCockpit({
                       <td className="py-3.5 px-3.5 text-center font-extrabold text-amber-800">
                         {caller.recall_count}
                       </td>
-                      <td className="py-3.5 px-3.5 text-center font-extrabold text-emerald-700">
-                        {caller.sales_pool_count}
+                      <td className="py-3.5 px-3.5 text-center font-extrabold text-teal-700">
+                        <span className="bg-teal-50 border border-teal-200 text-teal-800 px-2 py-0.5 rounded-lg">
+                          {caller.whatsapp_count || 0}
+                        </span>
                       </td>
                       <td className="py-3.5 px-3.5 text-center font-extrabold text-orange-700">
-                        {caller.unreachable_count}
+                        <span className="bg-orange-50 border border-orange-200 text-orange-800 px-2 py-0.5 rounded-lg">
+                          {caller.konusulmadi_count ?? caller.unreachable_count ?? 0}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3.5 text-center font-extrabold text-emerald-700">
+                        {caller.sales_pool_count}
                       </td>
                       <td className="py-3.5 px-3.5 text-center font-extrabold text-rose-700">
                         {caller.negative_count}

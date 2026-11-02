@@ -24,6 +24,9 @@ import {
   RotateCcw,
   ExternalLink,
   Layers,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
   X
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
@@ -69,6 +72,7 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
 
   const [pendingStops, setPendingStops] = useState([]);
   const [completedStops, setCompletedStops] = useState([]);
+  const [dailyCompletedCounts, setDailyCompletedCounts] = useState({});
   const [districts, setDistricts] = useState([]);
   const [districtFilter, setDistrictFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'completed'
@@ -76,6 +80,13 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
   const [loading, setLoading] = useState(true);
   const [reordering, setReordering] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Tamamlanan Ziyaretler Tarih Filtresi & Ufak Takvim State'leri
+  const [completedDateFilter, setCompletedDateFilter] = useState('all'); // 'all' | 'today' | 'yesterday' | 'this_week' | 'this_month' | 'calendar' | 'custom'
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(null); // 'YYYY-MM-DD'
+  const [calendarViewDate, setCalendarViewDate] = useState(() => new Date());
+  const [customDatePicker, setCustomDatePicker] = useState('');
+  const [showCalendar, setShowCalendar] = useState(true);
 
   // Sürükle-bırak state
   const [draggedIndex, setDraggedIndex] = useState(null);
@@ -127,6 +138,7 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
       });
       setPendingStops(res.pending || []);
       setCompletedStops(res.completed || []);
+      setDailyCompletedCounts(res.daily_completed_counts || {});
       if (districtFilter === 'all') {
         setDistricts(res.districts || []);
       }
@@ -337,16 +349,159 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
     );
   }
 
+  // ISO YYYY-MM-DD tarih yardımcıları
+  const getTodayIso = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getYesterdayIso = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getWeekRange = () => {
+    const d = new Date();
+    const dayOfWeek = (d.getDay() + 6) % 7; // Pazartesi = 0
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - dayOfWeek);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const toIso = (dt) => {
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      const day = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    return { start: toIso(monday), end: toIso(sunday) };
+  };
+
+  const formatTurkishDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const todayIso = getTodayIso();
+  const yesterdayIso = getYesterdayIso();
+  const weekRange = getWeekRange();
+  const thisMonthPrefix = todayIso.slice(0, 7);
+
+  // Günlük tamamlanan ziyaret sayıları sözlüğü
+  const countsByDate = React.useMemo(() => {
+    const map = { ...dailyCompletedCounts };
+    completedStops.forEach(item => {
+      const d = item.completed_date || (item.last_called_at ? item.last_called_at.slice(0, 10) : (item.updated_at ? item.updated_at.slice(0, 10) : null));
+      if (d && map[d] === undefined) {
+        map[d] = 1;
+      }
+    });
+    return map;
+  }, [dailyCompletedCounts, completedStops]);
+
+  // Hafta ve ay sayıları
+  const weekCount = React.useMemo(() => {
+    return Object.entries(countsByDate).reduce((acc, [d, c]) => {
+      return (d >= weekRange.start && d <= weekRange.end) ? acc + c : acc;
+    }, 0);
+  }, [countsByDate, weekRange]);
+
+  const monthTotalCount = React.useMemo(() => {
+    return Object.entries(countsByDate).reduce((acc, [d, c]) => {
+      return d.startsWith(thisMonthPrefix) ? acc + c : acc;
+    }, 0);
+  }, [countsByDate, thisMonthPrefix]);
+
+  // Mini takvim ay ve gün hesaplamaları
+  const calendarYear = calendarViewDate.getFullYear();
+  const calendarMonthIndex = calendarViewDate.getMonth();
+  const daysInMonth = new Date(calendarYear, calendarMonthIndex + 1, 0).getDate();
+  const firstDayOfWeek = (new Date(calendarYear, calendarMonthIndex, 1).getDay() + 6) % 7; // 0: Pzt
+
+  const monthNames = [
+    'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+    'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
+  ];
+  const monthTitle = `${monthNames[calendarMonthIndex]} ${calendarYear}`;
+  const calendarMonthPrefix = `${calendarYear}-${String(calendarMonthIndex + 1).padStart(2, '0')}`;
+
+  const totalVisitsInCalendarMonth = Object.entries(countsByDate).reduce((acc, [d, c]) => {
+    return d.startsWith(calendarMonthPrefix) ? acc + c : acc;
+  }, 0);
+
+  const handlePrevMonth = () => {
+    setCalendarViewDate(new Date(calendarYear, calendarMonthIndex - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setCalendarViewDate(new Date(calendarYear, calendarMonthIndex + 1, 1));
+  };
+
+  const handleGoToToday = () => {
+    const now = new Date();
+    setCalendarViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    setSelectedCalendarDate(todayIso);
+    setCompletedDateFilter('calendar');
+  };
+
+  const handleDayClick = (dateStr) => {
+    if (selectedCalendarDate === dateStr && completedDateFilter === 'calendar') {
+      setSelectedCalendarDate(null);
+      setCompletedDateFilter('all');
+    } else {
+      setSelectedCalendarDate(dateStr);
+      setCompletedDateFilter('calendar');
+    }
+  };
+
   const displayedList = (activeTab === 'pending' ? pendingStops : completedStops).filter(item => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      (item.name || '').toLowerCase().includes(q) ||
-      (item.district || '').toLowerCase().includes(q) ||
-      (item.address || '').toLowerCase().includes(q) ||
-      (item.phone || '').toLowerCase().includes(q) ||
-      (item.call_notes || '').toLowerCase().includes(q)
-    );
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchSearch = (
+        (item.name || '').toLowerCase().includes(q) ||
+        (item.district || '').toLowerCase().includes(q) ||
+        (item.address || '').toLowerCase().includes(q) ||
+        (item.phone || '').toLowerCase().includes(q) ||
+        (item.call_notes || '').toLowerCase().includes(q)
+      );
+      if (!matchSearch) return false;
+    }
+
+    if (activeTab === 'completed') {
+      const itemDate = item.completed_date || (item.last_called_at ? item.last_called_at.slice(0, 10) : (item.updated_at ? item.updated_at.slice(0, 10) : ''));
+      if (completedDateFilter === 'calendar' && selectedCalendarDate) {
+        return itemDate === selectedCalendarDate;
+      }
+      if (completedDateFilter === 'today') {
+        return itemDate === todayIso;
+      }
+      if (completedDateFilter === 'yesterday') {
+        return itemDate === yesterdayIso;
+      }
+      if (completedDateFilter === 'this_week') {
+        return itemDate >= weekRange.start && itemDate <= weekRange.end;
+      }
+      if (completedDateFilter === 'this_month') {
+        return itemDate && itemDate.startsWith(thisMonthPrefix);
+      }
+      if (completedDateFilter === 'custom' && customDatePicker) {
+        return itemDate === customDatePicker;
+      }
+    }
+
+    return true;
   });
 
   return (
@@ -524,6 +679,284 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
         </div>
       </div>
 
+      {/* ============================================================== */}
+      {/* TAMAMLANAN ZİYARETLER: UFAK TAKVİM VE TARİH FİLTRESİ */}
+      {/* ============================================================== */}
+      {activeTab === 'completed' && (
+        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-4">
+          {/* ÜST BAŞLIK VE TARİH HIZLI FİLTRELERİ */}
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wider">
+                  Ziyaret Takvimi & Tarih Filtresi
+                </h3>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Gün gün gidilen işletme sayıları ve geçmiş saha ziyaretleri
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCalendar(prev => !prev)}
+                className="ml-auto md:ml-3 text-[11px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 transition-all cursor-pointer"
+              >
+                {showCalendar ? 'Takvimi Gizle ▲' : 'Takvimi Göster ▼'}
+              </button>
+            </div>
+
+            {/* Hızlı Filtre Butonları */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedDateFilter('all');
+                  setSelectedCalendarDate(null);
+                  setCustomDatePicker('');
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                  completedDateFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Tümü ({completedStops.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedDateFilter('today');
+                  setSelectedCalendarDate(todayIso);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                  completedDateFilter === 'today'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Bugün ({countsByDate[todayIso] || 0})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedDateFilter('yesterday');
+                  setSelectedCalendarDate(yesterdayIso);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                  completedDateFilter === 'yesterday'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Dün ({countsByDate[yesterdayIso] || 0})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedDateFilter('this_week');
+                  setSelectedCalendarDate(null);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                  completedDateFilter === 'this_week'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Bu Hafta ({weekCount})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedDateFilter('this_month');
+                  setSelectedCalendarDate(null);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                  completedDateFilter === 'this_month'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Bu Ay ({monthTotalCount})
+              </button>
+
+              {/* Özel Tarih Seçici */}
+              <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1">
+                <CalendarDays className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <input
+                  type="date"
+                  value={customDatePicker}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomDatePicker(val);
+                    if (val) {
+                      setCompletedDateFilter('custom');
+                      setSelectedCalendarDate(val);
+                    }
+                  }}
+                  className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                  title="Belirli bir tarih seçin"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* UFAK TAKVİM (MINI CALENDAR WIDGET) */}
+          {showCalendar && (
+            <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-3">
+              {/* Ay Başlığı ve İleri/Geri Butonları */}
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    className="p-1.5 rounded-lg bg-white hover:bg-slate-200 border border-slate-200 text-slate-700 transition-all cursor-pointer shadow-2xs"
+                    title="Önceki Ay"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <h4 className="text-xs sm:text-sm font-black text-slate-800 capitalize min-w-[130px] text-center">
+                    {monthTitle}
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    className="p-1.5 rounded-lg bg-white hover:bg-slate-200 border border-slate-200 text-slate-700 transition-all cursor-pointer shadow-2xs"
+                    title="Sonraki Ay"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGoToToday}
+                    className="text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 ml-1 transition-all cursor-pointer"
+                  >
+                    Bugüne Dön
+                  </button>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {monthNames[calendarMonthIndex]} Ayı Toplam:
+                  </span>{' '}
+                  <span className="text-xs font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
+                    {totalVisitsInCalendarMonth} Ziyaret
+                  </span>
+                </div>
+              </div>
+
+              {/* Takvim Günleri Tablosu */}
+              <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center">
+                {/* Gün İsimleri */}
+                {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((d, i) => (
+                  <div key={d} className={`text-[10px] sm:text-[11px] font-black py-1 ${i >= 5 ? 'text-rose-500' : 'text-slate-600'}`}>
+                    {d}
+                  </div>
+                ))}
+
+                {/* Ay Başından Önceki Boş Hücreler */}
+                {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+                  <div key={`empty-${i}`} className="min-h-[46px] sm:min-h-[52px] rounded-xl bg-slate-100/40 border border-transparent" />
+                ))}
+
+                {/* Ayın Günleri */}
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                  const dayNum = i + 1;
+                  const dateStr = `${calendarMonthPrefix}-${String(dayNum).padStart(2, '0')}`;
+                  const visitCount = countsByDate[dateStr] || 0;
+                  const isSelected = selectedCalendarDate === dateStr && (completedDateFilter === 'calendar' || completedDateFilter === 'custom' || completedDateFilter === 'today' || completedDateFilter === 'yesterday');
+                  const isToday = dateStr === todayIso;
+
+                  return (
+                    <button
+                      key={dateStr}
+                      type="button"
+                      onClick={() => handleDayClick(dateStr)}
+                      className={`min-h-[46px] sm:min-h-[52px] p-1 sm:p-1.5 rounded-xl border flex flex-col items-center justify-between transition-all cursor-pointer text-left ${
+                        isSelected
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-md ring-2 ring-emerald-500 scale-[1.02]'
+                          : visitCount > 0
+                          ? 'bg-emerald-50/90 hover:bg-emerald-100 text-emerald-950 border-emerald-300 font-extrabold shadow-2xs'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                      } ${isToday && !isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                      title={`${dayNum} ${monthTitle}: ${visitCount} İşletme Ziyaret Edildi`}
+                    >
+                      <div className="w-full flex items-center justify-between">
+                        <span className={`text-[11px] sm:text-xs font-black ${isSelected ? 'text-white' : ''}`}>
+                          {dayNum}
+                        </span>
+                        {isToday && (
+                          <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-amber-300' : 'bg-blue-600'}`} title="Bugün" />
+                        )}
+                      </div>
+
+                      <div className="w-full text-center mt-0.5">
+                        {visitCount > 0 ? (
+                          <span
+                            className={`inline-block px-1 sm:px-1.5 py-0.2 sm:py-0.5 rounded text-[10px] sm:text-[11px] font-black leading-tight ${
+                              isSelected
+                                ? 'bg-white/25 text-white'
+                                : 'bg-emerald-600 text-white'
+                            }`}
+                          >
+                            {visitCount} <span className="hidden sm:inline">Ziyaret</span>
+                          </span>
+                        ) : (
+                          <span className={`text-[10px] font-medium ${isSelected ? 'text-white/60' : 'text-slate-300'}`}>
+                            -
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* AKTİF FİLTRE BİLGİ ROZETİ */}
+          {completedDateFilter !== 'all' && (
+            <div className="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-xs font-bold text-emerald-900">
+              <div className="flex items-center gap-1.5">
+                <Filter className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>
+                  Aktif Filtre:{' '}
+                  <strong>
+                    {completedDateFilter === 'calendar' || completedDateFilter === 'custom'
+                      ? formatTurkishDate(selectedCalendarDate || customDatePicker)
+                      : completedDateFilter === 'today'
+                      ? 'Bugün (' + formatTurkishDate(todayIso) + ')'
+                      : completedDateFilter === 'yesterday'
+                      ? 'Dün (' + formatTurkishDate(yesterdayIso) + ')'
+                      : completedDateFilter === 'this_week'
+                      ? 'Bu Hafta (' + formatTurkishDate(weekRange.start) + ' - ' + formatTurkishDate(weekRange.end) + ')'
+                      : 'Bu Ay (' + monthTitle + ')'}
+                  </strong>{' '}
+                  — {displayedList.length} İşletme Listeleniyor
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedDateFilter('all');
+                  setSelectedCalendarDate(null);
+                  setCustomDatePicker('');
+                }}
+                className="text-[11px] font-black text-rose-600 hover:text-rose-800 flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded-lg border border-rose-200"
+              >
+                <X className="w-3 h-3" />
+                <span>Filtreyi Temizle</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* DURAK LİSTESİ */}
       {loading ? (
         <div className="bg-white rounded-2xl p-12 border border-slate-200 text-center space-y-3">
@@ -534,13 +967,32 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
         <div className="bg-white rounded-2xl p-10 border border-slate-200 text-center space-y-3">
           <Navigation className="w-10 h-10 text-slate-300 mx-auto" />
           <h3 className="text-sm font-extrabold text-slate-700">
-            {activeTab === 'pending' ? 'Şu Anda Bekleyen Saha Ziyareti Bulunmuyor' : 'Henüz Tamamlanmış Ziyaret Yok'}
+            {activeTab === 'pending'
+              ? 'Şu Anda Bekleyen Saha Ziyareti Bulunmuyor'
+              : completedDateFilter !== 'all'
+              ? 'Seçili Tarihte Tamamlanmış Ziyaret Bulunmuyor'
+              : 'Henüz Tamamlanmış Ziyaret Yok'}
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto">
             {activeTab === 'pending'
               ? 'Çağrı personeli "Randevu (Yüz Yüze Ziyaret)" aldığında veya yönetici sahaya iş pasladığında işletmeler otomatik olarak buraya düşer.'
+              : completedDateFilter !== 'all'
+              ? 'Farklı bir tarih seçebilir veya tüm tamamlanan ziyaretleri görmek için filtreyi temizleyebilirsiniz.'
               : 'Ziyaret edip not aldığınız işletmeler burada listelenir.'}
           </p>
+          {activeTab === 'completed' && completedDateFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() => {
+                setCompletedDateFilter('all');
+                setSelectedCalendarDate(null);
+                setCustomDatePicker('');
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black shadow-xs hover:bg-emerald-700 transition-all cursor-pointer mt-2"
+            >
+              <span>Tüm Ziyaretleri Göster</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3.5">
@@ -585,8 +1037,8 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
                 )}
 
                 <div className="p-4 sm:p-5 flex flex-col lg:flex-row items-stretch justify-between gap-4">
-                  {/* SOL: SIRA NUMARASI & SIRALAMA KONTROLLERİ */}
-                  {activeTab === 'pending' && (
+                  {/* SOL: SIRA NUMARASI & SIRALAMA KONTROLLERİ VEYA TAMAMLANDI ROZETİ */}
+                  {activeTab === 'pending' ? (
                     <div className="flex lg:flex-col items-center justify-between lg:justify-start gap-2 bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 lg:w-28 shrink-0">
                       <div className="flex items-center lg:flex-col gap-2 lg:text-center">
                         <div
@@ -652,6 +1104,20 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
                         </div>
                       </div>
                     </div>
+                  ) : (
+                    <div className="flex lg:flex-col items-center justify-between lg:justify-start gap-2 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl p-2.5 lg:w-28 shrink-0 text-center">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center shadow-xs bg-emerald-600 text-white">
+                        <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
+                      </div>
+                      <div className="text-left lg:text-center">
+                        <span className="block text-[10px] font-extrabold uppercase tracking-wider text-emerald-800">
+                          Ziyaret Edildi
+                        </span>
+                        <span className="text-xs font-black text-slate-800">
+                          {lead.completed_date ? lead.completed_date.split('-').reverse().slice(0, 2).join('.') : 'Bitti'}
+                        </span>
+                      </div>
+                    </div>
                   )}
 
                   {/* ORTA: İŞLETME DETAYLARI & ÇAĞRI ÖN NOTLARI */}
@@ -675,6 +1141,22 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
                           {lead.field_member_name && (
                             <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
                               🚗 Saha: {lead.field_member_name}
+                            </span>
+                          )}
+                          {activeTab === 'completed' && lead.completed_date && (
+                            <span className="bg-slate-900 text-white text-[11px] font-extrabold px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                              <Calendar className="w-3 h-3 text-emerald-400" />
+                              <span>Ziyaret: {formatTurkishDate(lead.completed_date)}</span>
+                            </span>
+                          )}
+                          {lead.status === 'satis_havuzu' && (
+                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
+                              💰 Satış Havuzu
+                            </span>
+                          )}
+                          {lead.status === 'mutlak_olumsuz' && (
+                            <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
+                              ✖ Olumsuz
                             </span>
                           )}
                         </div>
