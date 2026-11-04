@@ -30,7 +30,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
-import { searchPlaces, importLeads, getTeamMembers } from '../api';
+import { searchPlaces, importLeads, getTeamMembers, isColdCallerRole } from '../api';
 
 const POPULAR_LOCATIONS = [
   { district: 'Atakum', city: 'Samsun', label: 'Samsun Atakum' },
@@ -83,12 +83,10 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
     getTeamMembers().then(res => {
       const list = res.data || [];
       setTeamMembers(list);
-      // Varsayılan olarak soğuk arama veya satış personellerini seç
-      const callers = list.filter(m => /arama|satış|satis|çağrı|cagri/i.test(m.role || ''));
+      // Yalnızca soğuk arama personellerini seç (Saha satış personelleri yalnızca yüz yüze görüşmeye gider)
+      const callers = list.filter(m => isColdCallerRole(m.role));
       if (callers.length > 0) {
         setSelectedCallerIds(new Set(callers.map(c => c.id)));
-      } else if (list.length > 0) {
-        setSelectedCallerIds(new Set(list.map(c => c.id)));
       }
     }).catch(err => console.error('Takım üyeleri alınamadı:', err));
   }, []);
@@ -1404,14 +1402,15 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5 text-indigo-600" />
-                    Veya Personellere Paylaştır:
+                    Veya Soğuk Arama Personellerine Paylaştır:
                   </label>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setDistributeToPool(false);
-                        setSelectedCallerIds(new Set(teamMembers.map(m => m.id)));
+                        const callers = teamMembers.filter(m => isColdCallerRole(m.role));
+                        setSelectedCallerIds(new Set(callers.map(m => m.id)));
                       }}
                       className="text-[11px] text-blue-600 font-bold hover:underline cursor-pointer"
                     >
@@ -1428,12 +1427,14 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                   </div>
                 </div>
 
-                {/* Personel Listesi */}
+                {/* Personel Listesi (Yalnızca Soğuk Arama Ekibi) */}
                 <div className="space-y-2 max-h-52 overflow-y-auto p-1">
-                  {teamMembers.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-4">Ekip üyesi bulunamadı.</p>
+                  {teamMembers.filter(m => isColdCallerRole(m.role)).length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-4">Kayıtlı soğuk arama personeli bulunamadı.</p>
                   ) : (
-                    teamMembers.map(member => {
+                    teamMembers
+                      .filter(m => isColdCallerRole(m.role))
+                      .map(member => {
                       const isChecked = !distributeToPool && selectedCallerIds.has(member.id);
                       return (
                         <div
@@ -1457,7 +1458,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                             </div>
                             <div>
                               <div className="text-xs font-bold text-slate-800">{member.name}</div>
-                              <div className="text-[11px] text-slate-500">{member.role || 'Ekip Üyesi'}</div>
+                              <div className="text-[11px] text-sky-700 font-semibold">📞 {member.role || 'Soğuk Arama'}</div>
                             </div>
                           </div>
 
@@ -1465,7 +1466,7 @@ export default function LeadFinder({ onImportComplete, hasApiKey, onOpenSettings
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => {}} // onClick parent handle ediyor
-                            className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                            className="w-4 h-4 text-indigo-600 rounded-sm border-slate-300 focus:ring-indigo-500 cursor-pointer pointer-events-none"
                           />
                         </div>
                       );

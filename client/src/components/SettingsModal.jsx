@@ -29,6 +29,7 @@ import {
   getSettings, 
   saveSettings, 
   testApiKey, 
+  getTeamMembers,
   addTeamMember, 
   addCategory, 
   getBackupData, 
@@ -61,6 +62,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
 
   // Kullanıcı Yönetimi State (Admin)
   const [usersList, setUsersList] = useState([]);
+  const [membersList, setMembersList] = useState(teamMembers || []);
   const [newUsername, setNewUsername] = useState('');
   const [newUserBulutfonExt, setNewUserBulutfonExt] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -172,6 +174,15 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
     }
   };
 
+  const loadMembers = async () => {
+    try {
+      const res = await getTeamMembers();
+      setMembersList(res.data || []);
+    } catch (err) {
+      console.error('Ekip üyeleri yüklenemedi:', err);
+    }
+  };
+
   const loadCampaigns = async () => {
     try {
       const res = await getCampaigns();
@@ -188,6 +199,12 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
   };
 
   useEffect(() => {
+    if (teamMembers && teamMembers.length > 0) {
+      setMembersList(teamMembers);
+    }
+  }, [teamMembers]);
+
+  useEffect(() => {
     if (isOpen) {
       getSettings().then(res => {
         setApiKey(res.google_maps_api_key || '');
@@ -197,6 +214,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       }).catch(err => console.error(err));
       loadCampaigns();
       loadUsers();
+      loadMembers();
       loadRoles();
     }
   }, [isOpen]);
@@ -222,6 +240,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       setNewUserName('');
       setNewUserBulutfonExt('');
       loadUsers();
+      loadMembers();
       if (onSettingsUpdated) onSettingsUpdated();
       setTimeout(() => setUserActionMsg(''), 3000);
     } catch (err) {
@@ -239,6 +258,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       const res = await deleteUser(userId);
       setUserActionMsg(`✓ ${res.message}`);
       loadUsers();
+      loadMembers();
       if (onSettingsUpdated) onSettingsUpdated();
       setTimeout(() => setUserActionMsg(''), 3000);
     } catch (err) {
@@ -334,6 +354,8 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
     if (!confirm(`"${memberName}" personeli silinecek ve üzerindeki işler boşa çıkarılacak. Emin misiniz?`)) return;
     try {
       await deleteTeamMember(memberId);
+      loadUsers();
+      loadMembers();
       if (onSettingsUpdated) onSettingsUpdated();
     } catch (err) {
       alert(`Hata: ${err.message}`);
@@ -502,6 +524,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
       setNewMemberName('');
       setNewMemberRole('Soğuk Arama');
       loadUsers();
+      loadMembers();
       if (onSettingsUpdated) onSettingsUpdated();
     } catch (err) {
       alert(`Ekip üyesi eklenirken hata: ${err.message}`);
@@ -1067,24 +1090,31 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
           </div>
         )}
 
-        {/* 2. KISIM: EKİP ÜYELERİ YÖNETİMİ (Diyagram: Sezai, Yeş, Burak, Emre) */}
+        {/* 2. KISIM: EKİP ÜYELERİ YÖNETİMİ */}
         <div className="mt-6 border-t border-slate-100 pt-5 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
-              <Users className="w-4 h-4 text-indigo-600" />
-              <span>Ekip Arkadaşları</span>
-            </h3>
-            <span className="text-xs text-slate-400">({teamMembers.length} kişi)</span>
+            <div>
+              <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <Users className="w-4 h-4 text-indigo-600" />
+                <span>Ekip Arkadaşları</span>
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Kullanıcı veya ekip üyesi eklendiğinde otomatik olarak buraya ve giriş sistemine yansır.
+              </p>
+            </div>
+            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+              {membersList.length} Kişi
+            </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {teamMembers.map((m) => (
-              <div key={m.id} className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-center relative group">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {membersList.map((m) => (
+              <div key={m.id} className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-center relative group shadow-2xs hover:border-slate-300 transition-all">
                 {isAdmin && (
                   <button
                     type="button"
                     onClick={() => handleDeleteMember(m.id, m.name)}
-                    className="absolute top-1 right-1 text-slate-400 hover:text-rose-600 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-1 right-1 text-slate-400 hover:text-rose-600 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     title="Personeli Sil"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -1096,8 +1126,16 @@ export default function SettingsModal({ isOpen, onClose, onSettingsUpdated, team
                 >
                   {m.name.slice(0, 2).toUpperCase()}
                 </div>
-                <div className="font-bold text-slate-800 text-xs">{m.name}</div>
-                <div className="text-[10px] text-slate-400 truncate">{m.role?.split('&')[0]}</div>
+                <div className="font-bold text-slate-800 text-xs truncate">{m.name}</div>
+                <div className="mt-1">
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    /saha/i.test(m.role || '') ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                    /soğuk|arama/i.test(m.role || '') ? 'bg-sky-100 text-sky-800 border border-sky-200' :
+                    'bg-slate-100 text-slate-700 border border-slate-200'
+                  }`}>
+                    {/saha/i.test(m.role || '') ? '🚗 ' : /soğuk|arama/i.test(m.role || '') ? '📞 ' : ''}{m.role || 'Personel'}
+                  </span>
+                </div>
               </div>
             ))}
           </div>

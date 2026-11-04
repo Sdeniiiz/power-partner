@@ -723,20 +723,20 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
               {/* 5. Olumsuz */}
               <button
                 type="button"
-                onClick={() => setActiveCallTab('mutlak_olumsuz')}
+                onClick={() => setActiveCallTab('olumsuz')}
                 className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeCallTab === 'mutlak_olumsuz'
-                    ? 'bg-red-600 text-white shadow-xs'
+                  activeCallTab === 'olumsuz'
+                    ? 'bg-rose-600 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
                 <XCircle className="w-3.5 h-3.5" />
                 <span>Olumsuz</span>
-                {leadStats?.mutlak_olumsuz !== undefined && (
+                {(leadStats?.olumsuz !== undefined || leadStats?.mutlak_olumsuz !== undefined) && (
                   <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    activeCallTab === 'mutlak_olumsuz' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    activeCallTab === 'olumsuz' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
                   }`}>
-                    {leadStats.mutlak_olumsuz}
+                    {leadStats?.olumsuz ?? leadStats?.mutlak_olumsuz ?? 0}
                   </span>
                 )}
               </button>
@@ -1583,15 +1583,16 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                   <span>📵 Konuşulmadı (Ulaşılamadı)</span>
                 </button>
 
-                {/* 6. Mutlak Olumsuz */}
+                {/* 6. Olumsuz */}
                 <button
                   type="button"
                   disabled={submittingCall}
-                  onClick={() => handleCallOutcomeSubmit('mutlak_olumsuz')}
-                  className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  onClick={() => handleCallOutcomeSubmit('olumsuz')}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  title="Telefonda olumsuz yanıt verdi"
                 >
                   <XCircle className="w-4 h-4" />
-                  <span>❌ Mutlak Olumsuz (İptal)</span>
+                  <span>❌ Olumsuz</span>
                 </button>
 
               </div>

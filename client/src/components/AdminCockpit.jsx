@@ -28,7 +28,7 @@ import {
   PhoneOff,
   X
 } from 'lucide-react';
-import { getAdminCockpit, getBulutfonDialUrl, triggerBulutfonCallApi } from '../api';
+import { getAdminCockpit, getBulutfonDialUrl, triggerBulutfonCallApi, isFieldStaffRole } from '../api';
 
 export default function AdminCockpit({
   authUser,
@@ -87,7 +87,10 @@ export default function AdminCockpit({
     red_flags_count: 0
   };
 
-  const coldCallers = data?.cold_callers_performance || [];
+  const rawColdCallers = data?.cold_callers_performance || [];
+  const coldCallers = rawColdCallers.filter(c => !isFieldStaffRole(c.role) && !/saha|yiğit|yigit|berat/i.test(c.name));
+  const rawCompletedCalls = pulse.today_completed_calls_list || [];
+  const todayCompletedCalls = rawCompletedCalls.filter(c => !isFieldStaffRole(c.role) && !/saha|yiğit|yigit|berat/i.test(c.name));
   const fieldStaff = data?.field_sales_performance || [];
   const soldJobs = data?.field_sold_jobs || [];
   const overdueRecalls = data?.red_flags?.overdue_recalls || [];
@@ -127,7 +130,7 @@ export default function AdminCockpit({
             {loading && <RefreshCw className="w-5 h-5 text-indigo-400 animate-spin" />}
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">
-            Soğuk arama ekibi (Bahar & Aslı) ve saha satış ekibinin (Yiğit) günlük performans karnesi, kapanan cirolar ve alarm merkezi.
+            Soğuk arama ekibi (Bahar & Aslı) ve saha satış ekibinin (Yiğit & Berat) günlük performans karnesi, kapanan cirolar ve alarm merkezi.
           </p>
         </div>
 
@@ -214,8 +217,8 @@ export default function AdminCockpit({
             </div>
             <div className="flex flex-wrap gap-1.5">
               {range === 'today' ? (
-                pulse.today_completed_calls_list && pulse.today_completed_calls_list.length > 0 ? (
-                  pulse.today_completed_calls_list.map(c => (
+                todayCompletedCalls && todayCompletedCalls.length > 0 ? (
+                  todayCompletedCalls.map(c => (
                     <span
                       key={c.name}
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-900 border border-blue-200 text-xs font-bold"
@@ -468,68 +471,79 @@ export default function AdminCockpit({
             </div>
           </div>
 
-          {/* Saha Satış Karnesi (Yiğit) ve Arama Dağılım Grafiği */}
+          {/* Saha Satış Karnesi (Tüm Saha Satış Ekibi: Yiğit, Berat Mumcu vb.) ve Arama Dağılım Grafiği */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             
-            {/* Yiğit Saha Satış Kartı */}
-            <div className="lg:col-span-1 bg-gradient-to-br from-emerald-900 via-slate-900 to-teal-950 text-white rounded-3xl p-5 border border-emerald-800/50 shadow-xl flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-full border border-emerald-400/30">
-                    🚗 Saha Satış Sorumlusu
-                  </span>
-                  <Award className="w-5 h-5 text-amber-400" />
+            {/* Saha Satış Ekip Kartları */}
+            <div className="lg:col-span-1 space-y-4">
+              {fieldStaff.length === 0 ? (
+                <div className="bg-slate-900 text-white rounded-3xl p-5 border border-slate-800 shadow-xl text-center py-8">
+                  <MapPin className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                  <p className="text-xs text-slate-400">Kayıtlı saha satış personeli bulunamadı.</p>
                 </div>
-                <h3 className="text-lg font-black text-white">Yiğit dalkılıç</h3>
-                <p className="text-xs text-emerald-200/80 mt-1">
-                  Yüz yüze işletme ziyaretleri, teklif sunumu ve sözleşme kapama performansı.
-                </p>
+              ) : (
+                fieldStaff.map(staff => (
+                  <div key={staff.name} className="bg-gradient-to-br from-emerald-900 via-slate-900 to-teal-950 text-white rounded-3xl p-5 border border-emerald-800/50 shadow-xl flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-full border border-emerald-400/30">
+                          🚗 Saha Satış Sorumlusu
+                        </span>
+                        <Award className="w-5 h-5 text-amber-400" />
+                      </div>
+                      <h3 className="text-lg font-black text-white">{staff.name}</h3>
+                      <p className="text-xs text-emerald-200/80 mt-1">
+                        Yüz yüze işletme ziyaretleri, teklif sunumu ve sözleşme kapama performansı.
+                      </p>
 
-                {/* Büyük Rakamlar */}
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  <div className="bg-white/10 rounded-2xl p-3 border border-white/10 backdrop-blur-xs">
-                    <span className="text-[10px] text-emerald-300 font-extrabold uppercase tracking-wider block">
-                      Ziyaret Edilen
-                    </span>
-                    <span className="text-2xl font-black text-white mt-1 block">
-                      {fieldStaff.find(f => /yiğit/i.test(f.name))?.total_visits || 0}
-                    </span>
-                  </div>
-                  <div className="bg-white/10 rounded-2xl p-3 border border-white/10 backdrop-blur-xs">
-                    <span className="text-[10px] text-amber-300 font-extrabold uppercase tracking-wider block">
-                      Kapanan Satış
-                    </span>
-                    <span className="text-2xl font-black text-amber-300 mt-1 block">
-                      {fieldStaff.find(f => /yiğit/i.test(f.name))?.positive_sales || 0}
-                    </span>
-                  </div>
-                </div>
+                      {/* Büyük Rakamlar */}
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div className="bg-white/10 rounded-2xl p-3 border border-white/10 backdrop-blur-xs">
+                          <span className="text-[10px] text-emerald-300 font-extrabold uppercase tracking-wider block">
+                            Ziyaret Edilen
+                          </span>
+                          <span className="text-2xl font-black text-white mt-1 block">
+                            {staff.total_visits || 0}
+                          </span>
+                        </div>
+                        <div className="bg-white/10 rounded-2xl p-3 border border-white/10 backdrop-blur-xs">
+                          <span className="text-[10px] text-amber-300 font-extrabold uppercase tracking-wider block">
+                            Kapanan Satış
+                          </span>
+                          <span className="text-2xl font-black text-amber-300 mt-1 block">
+                            {staff.positive_sales || 0}
+                          </span>
+                        </div>
+                      </div>
 
-                <div className="mt-4 bg-emerald-500/20 rounded-2xl p-3.5 border border-emerald-400/30 flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-emerald-200 block font-bold">Kapama Başarı Oranı:</span>
-                    <span className="text-xl font-black text-white">
-                      %{fieldStaff.find(f => /yiğit/i.test(f.name))?.closing_rate || 0}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[11px] text-emerald-200 block font-bold">Toplam Ciro:</span>
-                    <span className="text-base font-black text-amber-300">
-                      {(fieldStaff.find(f => /yiğit/i.test(f.name))?.total_revenue || 0).toLocaleString('tr-TR')} TL
-                    </span>
-                  </div>
-                </div>
-              </div>
+                      <div className="mt-3.5 bg-emerald-500/20 rounded-2xl p-3 border border-emerald-400/30 flex items-center justify-between">
+                        <div>
+                          <span className="text-[11px] text-emerald-200 block font-bold">Kapama Oranı:</span>
+                          <span className="text-xl font-black text-white">
+                            %{staff.closing_rate || 0}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[11px] text-emerald-200 block font-bold">Toplam Ciro:</span>
+                          <span className="text-base font-black text-amber-300">
+                            {(staff.total_revenue || 0).toLocaleString('tr-TR')} TL
+                          </span>
+                        </div>
+                      </div>
+                    </div>
 
-              <div className="mt-5 pt-3 border-t border-white/10 text-right">
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('sold_jobs')}
-                  className="text-xs font-black text-emerald-300 hover:text-white flex items-center justify-end gap-1 cursor-pointer transition-colors"
-                >
-                  <span>Satılan İşleri İncele →</span>
-                </button>
-              </div>
+                    <div className="mt-4 pt-2.5 border-t border-white/10 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setActiveSubTab('sold_jobs')}
+                        className="text-xs font-black text-emerald-300 hover:text-white flex items-center justify-end gap-1 cursor-pointer transition-colors"
+                      >
+                        <span>Satılan İşleri İncele →</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
             {/* Arama Çıktıları Dağılım Çubukları */}
@@ -550,7 +564,7 @@ export default function AdminCockpit({
                     { label: '💬 WhatsApp Bilgi İstendi', count: outcomeDist.whatsapp_bilgi || 0, color: 'bg-teal-600', textColor: 'text-teal-700' },
                     { label: '🎉 Satış / Satış Havuzu', count: outcomeDist.satis_havuzu || 0, color: 'bg-emerald-600', textColor: 'text-emerald-700' },
                     { label: '📵 Konuşulmadı (Ulaşılamadı)', count: outcomeDist.konusulmadi || 0, color: 'bg-orange-500', textColor: 'text-orange-700' },
-                    { label: '❌ Mutlak Olumsuz', count: outcomeDist.mutlak_olumsuz || 0, color: 'bg-rose-500', textColor: 'text-rose-700' },
+                    { label: '❌ Olumsuz (Sahaya Paslanabilir)', count: (outcomeDist.olumsuz || outcomeDist.mutlak_olumsuz || 0), color: 'bg-rose-500', textColor: 'text-rose-700' },
                   ].map(item => {
                     const percent = totalCalls > 0 ? Math.round((item.count / totalCalls) * 100) : 0;
                     return (

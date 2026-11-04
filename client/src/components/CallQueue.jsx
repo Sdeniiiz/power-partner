@@ -36,7 +36,8 @@ import {
 import InstagramIcon from './InstagramIcon';
 import DailyActivityModal from './DailyActivityModal';
 import AppointmentCapacityModal from './AppointmentCapacityModal';
-import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote, assignToFieldRoute, isFieldStaffRole, getAppointmentCapacity } from '../api';
+import NegativeLeadsMap from './NegativeLeadsMap';
+import { getLeads, recordCall, requeueUnreachable, deleteLead, updateLead, updateBatchStatus, getLeadFilterMeta, distributeLeads, getTeamMembers, triggerBulutfonCallApi, getBulutfonDialUrl, parseCallNote, assignToFieldRoute, isFieldStaffRole, isColdCallerRole, getAppointmentCapacity, passLeadsToField, archiveLeadsToMutlakOlumsuz } from '../api';
 
 export default function CallQueue({ 
   currentUser, 
@@ -51,6 +52,7 @@ export default function CallQueue({
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('all'); // Varsayılan: Tümü (başlangıçta tüm 243 işletmeyi eksiksiz gösterir)
+  const [negativeViewMode, setNegativeViewMode] = useState('list'); // 'list' | 'map'
   const [leadStats, setLeadStats] = useState(null);
   const [districtFilter, setDistrictFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -217,8 +219,10 @@ export default function CallQueue({
   };
 
   const handleQuickAutoDistribute = async () => {
-    if (teamMembers.length === 0) {
-      alert('Sistemde kayıtlı personel bulunamadı.');
+    // Saha satış personelleri sadece yüz yüze görüşmeye gider, telefon aramaları yalnızca Soğuk Arama ekibine dağıtılır
+    const eligibleCallers = teamMembers.filter(m => isColdCallerRole(m.role));
+    if (eligibleCallers.length === 0) {
+      alert('Sistemde telefon araması yapacak kayıtlı "Soğuk Arama" personeli bulunamadı.');
       return;
     }
     const count = parseInt(quickAssignBatchCount) || 0;
@@ -243,9 +247,10 @@ export default function CallQueue({
     try {
       const res = await distributeLeads({
         lead_ids: candidateIds,
-        caller_ids: teamMembers.map(m => m.id)
+        caller_ids: eligibleCallers.map(m => m.id)
       });
-      setActionSuccessMsg(res.message || `${candidateIds.length} işletme personellere eşit paylaştırıldı ve bildirim gönderildi.`);
+      const callerNames = eligibleCallers.map(c => c.name).join(', ');
+      setActionSuccessMsg(res.message || `${candidateIds.length} işletme soğuk arama personellerine (${callerNames}) eşit paylaştırıldı.`);
       setSelectedLeadIds([]);
       loadLeads();
       setTimeout(() => setActionSuccessMsg(''), 4000);
@@ -253,6 +258,32 @@ export default function CallQueue({
       alert(`Eşit dağıtım hatası: ${err.message}`);
     } finally {
       setBatchActionLoading(false);
+    }
+  };
+
+  const handleNegativePassToField = async (payload) => {
+    try {
+      const res = await passLeadsToField(payload);
+      setActionSuccessMsg(res.message || 'Seçilen işletmeler sahaya paslandı.');
+      loadLeads();
+      loadStats();
+      if (onLeadUpdated) onLeadUpdated();
+      setTimeout(() => setActionSuccessMsg(''), 4000);
+    } catch (err) {
+      alert(`Sahaya paslama hatası: ${err.response?.data?.error || err.message}`);
+    }
+  };
+
+  const handleNegativeArchiveMutlakOlumsuz = async (payload) => {
+    try {
+      const res = await archiveLeadsToMutlakOlumsuz(payload);
+      setActionSuccessMsg(res.message || 'Seçilen işletmeler mutlak olumsuza alındı.');
+      loadLeads();
+      loadStats();
+      if (onLeadUpdated) onLeadUpdated();
+      setTimeout(() => setActionSuccessMsg(''), 4000);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
     }
   };
 
@@ -757,14 +788,31 @@ export default function CallQueue({
           </button>
 
           <button
-            onClick={() => setStatusFilter('mutlak_olumsuz')}
+            onClick={() => setStatusFilter('olumsuz')}
             className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-              statusFilter === 'mutlak_olumsuz'
-                ? 'bg-red-600 text-white shadow-xs'
+              statusFilter === 'olumsuz'
+                ? 'bg-rose-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            <span>Mutlak Olumsuz</span>
+            <span>Olumsuzlar</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'olumsuz' ? 'bg-white/25 text-white' : 'bg-rose-100 text-rose-800'
+            }`}>
+              {leadStats?.olumsuz ?? 0}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('mutlak_olumsuz')}
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+              statusFilter === 'mutlak_olumsuz'
+                ? 'bg-red-800 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+            title="Admin onaylı kalıcı iptal/arşiv kayıtları"
+          >
+            <span>Kara Liste (Arşiv)</span>
             <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
               statusFilter === 'mutlak_olumsuz' ? 'bg-white/25 text-white' : 'bg-red-100 text-red-800'
             }`}>
@@ -1291,8 +1339,53 @@ export default function CallQueue({
         </div>
       )}
 
-      {/* Arama Kartları / Tablosu */}
-      {loading ? (
+      {/* Olumsuzlar Havuzu Özel Üst Paneli */}
+      {statusFilter === 'olumsuz' && (
+        <div className="bg-gradient-to-r from-rose-900 via-slate-900 to-indigo-950 rounded-2xl p-4 text-white shadow-md border border-rose-800/40 flex flex-col md:flex-row md:items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center justify-center font-black text-lg">
+              ❌
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white flex items-center gap-2">
+                <span>Olumsuz İşletmeler Havuzu ({leadStats?.olumsuz ?? leads.length})</span>
+                <span className="bg-rose-500/20 text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-500/30">
+                  Yüz Yüze İkna Potansiyeli
+                </span>
+              </h4>
+              <p className="text-xs text-rose-200/80 mt-0.5">
+                Telefonda olumsuz yanıt veren işletmeler. Konumlarına göre sahaya paslayabilir veya mutlak olumsuza alabilirsiniz.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setNegativeViewMode(prev => prev === 'map' ? 'list' : 'map')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-all cursor-pointer ${
+                negativeViewMode === 'map'
+                  ? 'bg-rose-500 hover:bg-rose-400 text-white'
+                  : 'bg-white hover:bg-slate-100 text-slate-900'
+              }`}
+            >
+              <span>{negativeViewMode === 'map' ? '📋 Liste Görünümüne Dön' : '🗺️ Harita ve Rota Görünümü'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Arama Kartları / Tablosu veya Harita Görünümü */}
+      {statusFilter === 'olumsuz' && negativeViewMode === 'map' ? (
+        <NegativeLeadsMap
+          leads={leads}
+          teamMembers={teamMembers}
+          selectedDistrict={districtFilter || 'all'}
+          onDistrictChange={(d) => setDistrictFilter(d === 'all' ? '' : d)}
+          onPassToField={handleNegativePassToField}
+          onArchiveToMutlakOlumsuz={handleNegativeArchiveMutlakOlumsuz}
+          onClose={() => setNegativeViewMode('list')}
+        />
+      ) : loading ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 text-slate-500">
           <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
           <p className="text-xs font-semibold">İşletmeler yükleniyor...</p>
@@ -2062,15 +2155,16 @@ export default function CallQueue({
                   <span>📵 Konuşulmadı (Ulaşılamadı)</span>
                 </button>
 
-                {/* 6. Mutlak Olumsuz -> Süreç Sonu */}
+                {/* 6. Olumsuz */}
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={() => handleOutcomeSubmit('mutlak_olumsuz')}
-                  className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  onClick={() => handleOutcomeSubmit('olumsuz')}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs p-3 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                  title="Telefonda olumsuz yanıt verdi (Admin tarafından sahaya paslanabilir veya incelenebilir)"
                 >
                   <XCircle className="w-4 h-4" />
-                  <span>❌ Mutlak Olumsuz (İptal)</span>
+                  <span>❌ Olumsuz</span>
                 </button>
 
               </div>

@@ -179,12 +179,13 @@ router.put('/members/:id', async (req, res) => {
       WHERE id = ?
     `, updatedName, updatedRole, updatedEmail, updatedPhone, updatedColor, updatedExt || null, memberId);
 
-    // users tablosunu da güncelle
+    // users tablosunu da güncelle (isim, rol, dahili)
+    const userRole = updatedRole === 'Yönetici (Admin)' ? 'admin' : updatedRole;
     await db.run(`
       UPDATE users 
-      SET name = ?, person = ?, bulutfon_ext = ?
+      SET name = ?, role = ?, person = ?, bulutfon_ext = ?
       WHERE LOWER(name) = LOWER(?)
-    `, updatedName, updatedName, updatedExt || null, existing.name);
+    `, updatedName, userRole, updatedName, updatedExt || null, existing.name);
 
     res.json({ success: true, message: 'Personel bilgileri güncellendi.' });
   } catch (err) {
@@ -353,12 +354,22 @@ router.put('/users/:id', async (req, res) => {
       WHERE id = ?
     `, newName, newRole, newPerson, newExt || null, newKey || null, userId);
 
-    // team_members tablosunda da varsa güncelle
-    await db.run(`
-      UPDATE team_members 
-      SET name = ?, bulutfon_ext = ?, bulutfon_api_key = ?
-      WHERE LOWER(name) = LOWER(?)
-    `, newName, newExt || null, newKey || null, user.name);
+    // team_members tablosunda da varsa güncelle, yoksa ekle (tam senkron)
+    const displayRole = newRole === 'admin' ? 'Yönetici (Admin)' : newRole;
+    const newColor = getRoleColor(newRole);
+    const existingMember = await db.get('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)', user.name.trim());
+    if (existingMember) {
+      await db.run(`
+        UPDATE team_members 
+        SET name = ?, role = ?, color = ?, bulutfon_ext = ?, bulutfon_api_key = ?
+        WHERE id = ?
+      `, newName, displayRole, newColor, newExt || null, newKey || null, existingMember.id);
+    } else {
+      await db.run(`
+        INSERT INTO team_members (name, role, color, bulutfon_ext, bulutfon_api_key)
+        VALUES (?, ?, ?, ?, ?)
+      `, newName, displayRole, newColor, newExt || null, newKey || null);
+    }
 
     res.json({ success: true, message: 'Kullanıcı bilgileri güncellendi.' });
   } catch (err) {

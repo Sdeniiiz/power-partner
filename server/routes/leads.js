@@ -22,6 +22,7 @@ const getCachedStats = async (callerId = null) => {
       SUM(CASE WHEN status = 'randevu_arama' THEN 1 ELSE 0 END) as randevu_arama,
       SUM(CASE WHEN status = 'randevu' THEN 1 ELSE 0 END) as randevu,
       SUM(CASE WHEN status = 'iletisimsiz' THEN 1 ELSE 0 END) as iletisimsiz,
+      SUM(CASE WHEN status = 'olumsuz' THEN 1 ELSE 0 END) as olumsuz,
       SUM(CASE WHEN status = 'mutlak_olumsuz' THEN 1 ELSE 0 END) as mutlak_olumsuz,
       SUM(CASE WHEN status = 'satis_havuzu' THEN 1 ELSE 0 END) as satis_havuzu,
       SUM(CASE WHEN status = 'is_dagitildi' THEN 1 ELSE 0 END) as is_dagitildi,
@@ -101,7 +102,8 @@ router.post('/search', async (req, res) => {
       satis_havuzu: 'Satış Havuzunda',
       is_dagitildi: 'İş Alındı & Dağıtıldı',
       iletisimsiz: 'Ulaşılamadı',
-      mutlak_olumsuz: 'Olumsuz Görüşüldü'
+      olumsuz: 'Olumsuz Görüşüldü (Sahaya Paslanabilir)',
+      mutlak_olumsuz: 'Mutlak Olumsuz (Arşiv / İptal)'
     };
 
     const placeIdMap = new Map();
@@ -858,9 +860,34 @@ router.get('/admin-cockpit', async (req, res) => {
     );
 
     const teamMembersList = await db.all("SELECT id, name, role, color FROM team_members");
+
+    // Saha satış ekibi (Kesinlikle soğuk arama havuzunda, karnesinde ve arama listelerinde yer almaz)
+    const fieldStaffNamesSet = new Set(
+      teamMembersList
+        .filter(m => /saha/i.test(m.role || ''))
+        .map(m => m.name.toLowerCase().trim())
+    );
+    fieldStaffNamesSet.add('yiğit dalkılıç');
+    fieldStaffNamesSet.add('yigit dalkilic');
+    fieldStaffNamesSet.add('yiğit');
+    fieldStaffNamesSet.add('yigit');
+    fieldStaffNamesSet.add('beratmumcu');
+    fieldStaffNamesSet.add('berat mumcu');
+
+    const isSahaStaff = (rawName) => {
+      if (!rawName) return false;
+      const lower = rawName.toLowerCase().trim();
+      if (lower.includes('(saha)')) return true;
+      if (fieldStaffNamesSet.has(lower)) return true;
+      if (lower.includes('yiğit') || lower.includes('yigit') || lower.includes('berat')) return true;
+      const matched = teamMembersList.find(m => m.name.toLowerCase().trim() === lower);
+      if (matched && /saha/i.test(matched.role || '')) return true;
+      return false;
+    };
+
     const coldCallerNamesSet = new Set(
       teamMembersList
-        .filter(m => /soğuk|soguk|arama|tele/i.test(m.role || ''))
+        .filter(m => !isSahaStaff(m.name) && /soğuk|soguk|arama|tele|caller|çağrı|cagri/i.test(m.role || ''))
         .map(m => m.name.toLowerCase().trim())
     );
     coldCallerNamesSet.add('bahar');
@@ -870,18 +897,24 @@ router.get('/admin-cockpit', async (req, res) => {
 
     const coldCallersMap = {};
 
-    // Bugün yapılan aramaların personel bazında dağılımı (Bahar, Aslı vb.)
+    // Bugün yapılan aramaların personel bazında dağılımı (Sadece Soğuk Arama Ekibi)
     const todayCallerCounts = {};
     teamMembersList.forEach(m => {
       const lower = m.name.toLowerCase().trim();
-      if (coldCallerNamesSet.has(lower)) {
+      if (coldCallerNamesSet.has(lower) && !isSahaStaff(m.name)) {
         todayCallerCounts[m.name] = { name: m.name, role: m.role || 'Soğuk Arama', color: m.color || '#0284c7', count: 0, konusulmadi: 0, whatsapp: 0, randevu: 0 };
       }
     });
 
+    let todayValidColdCallsCount = 0;
     todayCallsLogs.forEach(log => {
       const rawName = (log.caller_name || 'Bilinmeyen').trim();
+      if (isSahaStaff(rawName)) return; // Saha personeli soğuk arama sayısına girmez
+
+      todayValidColdCallsCount += 1;
       if (!todayCallerCounts[rawName]) {
+        const matched = teamMembersList.find(m => m.name.toLowerCase().trim() === rawName.toLowerCase());
+        if (matched && /saha|yazılım|yazilim|imalat|baskı/i.test(matched.role || '')) return;
         todayCallerCounts[rawName] = { name: rawName, role: 'Soğuk Arama', color: '#0284c7', count: 0, konusulmadi: 0, whatsapp: 0, randevu: 0 };
       }
       todayCallerCounts[rawName].count += 1;
@@ -895,12 +928,12 @@ router.get('/admin-cockpit', async (req, res) => {
     });
 
     const todayCompletedCallsList = Object.values(todayCallerCounts).sort((a, b) => b.count - a.count);
-    const todayCompletedCallsTotal = todayCallsLogs.length;
+    const todayCompletedCallsTotal = todayValidColdCallsCount;
 
     // Bahar, Aslı ve soğuk arama rolündeki üyeleri önceden ekle (günün başında 0 arama olsa bile görünsünler)
     teamMembersList.forEach(m => {
       const lower = m.name.toLowerCase().trim();
-      if (coldCallerNamesSet.has(lower)) {
+      if (coldCallerNamesSet.has(lower) && !isSahaStaff(m.name)) {
         coldCallersMap[m.name] = {
           name: m.name,
           role: m.role || 'Soğuk Arama',
@@ -923,12 +956,22 @@ router.get('/admin-cockpit', async (req, res) => {
     callLogsInRange.forEach(log => {
       const rawName = (log.caller_name || 'Bilinmeyen').trim();
       const lower = rawName.toLowerCase();
-      if (lower.includes('(saha)') || log.outcome === 'ziyaret_notu' || log.outcome === 'ziyaret_olumlu' || log.outcome === 'ziyaret_olumsuz') {
+      if (
+        isSahaStaff(rawName) ||
+        lower.includes('(saha)') ||
+        log.outcome === 'ziyaret_notu' ||
+        log.outcome === 'ziyaret_olumlu' ||
+        log.outcome === 'ziyaret_olumsuz'
+      ) {
+        return;
+      }
+
+      const matchedMember = teamMembersList.find(m => m.name.toLowerCase().trim() === lower);
+      if (matchedMember && /saha|yazılım|yazilim|imalat|baskı/i.test(matchedMember.role || '')) {
         return;
       }
 
       if (!coldCallersMap[rawName]) {
-        const matchedMember = teamMembersList.find(m => m.name.toLowerCase().trim() === lower);
         coldCallersMap[rawName] = {
           name: rawName,
           role: matchedMember?.role || 'Soğuk Arama',
@@ -975,16 +1018,7 @@ router.get('/admin-cockpit', async (req, res) => {
       return c;
     }).sort((a, b) => b.total_calls - a.total_calls);
 
-    // 3. SAHA SATIŞ PERSONEL KARNESİ (Yiğit Öncelikli)
-    const fieldStaffNamesSet = new Set(
-      teamMembersList
-        .filter(m => /saha/i.test(m.role || ''))
-        .map(m => m.name.toLowerCase().trim())
-    );
-    fieldStaffNamesSet.add('yiğit dalkılıç');
-    fieldStaffNamesSet.add('yigit dalkilic');
-    fieldStaffNamesSet.add('yiğit');
-
+    // 3. SAHA SATIŞ PERSONEL KARNESİ (Yiğit ve Berat Öncelikli)
     const fieldStaffMap = {};
 
     // Yiğit ve saha ekibini önceden ekle (0 ziyaret olsa bile tabloda yer alsın)
@@ -1014,6 +1048,7 @@ router.get('/admin-cockpit', async (req, res) => {
 
       const cleanName = rawName.replace(/\(saha\)/gi, '').trim() || 'Yiğit dalkılıç';
       const cleanLower = cleanName.toLowerCase();
+      if (cleanLower.includes('admin') || cleanLower.includes('sistem yöneticisi')) return;
 
       if (!fieldStaffMap[cleanName]) {
         const matchedMember = teamMembersList.find(m => m.name.toLowerCase().trim() === cleanLower);
@@ -1123,6 +1158,7 @@ router.get('/admin-cockpit', async (req, res) => {
       whatsapp_bilgi: 0,
       konusulmadi: 0,
       satis_havuzu: 0,
+      olumsuz: 0,
       mutlak_olumsuz: 0,
       diger: 0
     };
@@ -1130,6 +1166,8 @@ router.get('/admin-cockpit', async (req, res) => {
     callLogsInRange.forEach(l => {
       if (l.outcome === 'konusulmadi' || l.outcome === 'iletisimsiz') {
         outcomeCounts.konusulmadi += 1;
+      } else if (l.outcome === 'olumsuz' || l.outcome === 'mutlak_olumsuz') {
+        outcomeCounts.olumsuz += 1;
       } else if (outcomeCounts[l.outcome] !== undefined) {
         outcomeCounts[l.outcome] += 1;
       } else {
@@ -1854,13 +1892,14 @@ router.post('/:id/call', async (req, res) => {
     if (!lead) return res.status(404).json({ error: 'İşletme bulunamadı' });
 
     let newStatus = lead.status;
-    if (outcome === 'mutlak_olumsuz') newStatus = 'mutlak_olumsuz';
+    if (outcome === 'olumsuz' || outcome === 'mutlak_olumsuz') newStatus = 'olumsuz';
+    else if (outcome === 'kesin_mutlak_olumsuz' || outcome === 'mutlak_olumsuz_admin') newStatus = 'mutlak_olumsuz';
     else if (outcome === 'iletisimsiz' || outcome === 'konusulmadi') newStatus = 'iletisimsiz';
     else if (outcome === 'whatsapp_bilgi') newStatus = 'randevu_arama'; // WhatsApp'tan bilgi isteyenler takipte
     else if (outcome === 'randevu') newStatus = 'randevu';
     else if (outcome === 'randevu_arama') newStatus = 'randevu_arama'; // ⭐ Arama Randevusu
     else if (outcome === 'ziyaret_olumlu') newStatus = 'satis_havuzu';
-    else if (outcome === 'ziyaret_olumsuz') newStatus = 'mutlak_olumsuz';
+    else if (outcome === 'ziyaret_olumsuz') newStatus = 'olumsuz';
     else if (outcome === 'satis') newStatus = 'satis_havuzu';
 
     // Personel adını belirle ve notu "Sezai [12.10.2026 14:35]: ..." şeklinde sistem saatinden çekerek biçimlendir
@@ -1885,6 +1924,8 @@ router.post('/:id/call', async (req, res) => {
         rawNote = 'WhatsApp üzerinden detaylı bilgi ve teklif istedi.';
       } else if (outcome === 'konusulmadi') {
         rawNote = 'Konuşulmadı / Ulaşılamadı.';
+      } else if (outcome === 'olumsuz') {
+        rawNote = 'Olumsuz görüşüldü (İlgilenmiyor).';
       }
     }
 
@@ -2329,6 +2370,142 @@ router.delete('/campaigns/delete', async (req, res) => {
 
     res.json({ success: true, count: 0, message: 'Silinecek işletme bulunamadı.' });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Olumsuz işletmeleri Sahaya Pasla (Saha Personeline Atama & Rota Ekleme)
+router.post('/batch-pass-to-field', async (req, res) => {
+  try {
+    const { lead_ids, field_member_id, field_member_name, visit_date, admin_note } = req.body;
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ error: 'Lütfen sahaya paslanacak en az bir işletme seçiniz.' });
+    }
+    if (!field_member_name && !field_member_id) {
+      return res.status(400).json({ error: 'Lütfen atanacak saha satış personelini seçiniz.' });
+    }
+
+    let memberId = field_member_id;
+    let memberName = field_member_name;
+
+    if (!memberName && memberId) {
+      const m = await db.get('SELECT name FROM team_members WHERE id = ?', memberId);
+      if (m) memberName = m.name;
+    } else if (!memberId && memberName) {
+      const m = await db.get('SELECT id FROM team_members WHERE LOWER(name) = LOWER(?)', memberName.trim());
+      if (m) memberId = m.id;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
+    const timeStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+    const targetVisitDate = visit_date || `${now.toISOString().slice(0, 10)} 14:00`;
+
+    const noteToAppend = `\nYönetici (Admin) [${dateStr} ${timeStr}]: Olumsuz havuzundan sahaya paslandı. Sorumlu: ${memberName}. ${admin_note ? 'Yönetici Notu: ' + admin_note : 'Yüz yüze görüşülecek.'}`;
+
+    const placeholders = lead_ids.map(() => '?').join(',');
+    const leads = await db.all(`SELECT id, name, call_notes FROM leads WHERE id IN (${placeholders})`, ...lead_ids);
+
+    const stmts = [];
+    for (const lead of leads) {
+      const updatedNotes = (lead.call_notes || '') + noteToAppend;
+      stmts.push({
+        sql: `UPDATE leads 
+              SET status = 'randevu',
+                  field_member_id = ?,
+                  field_member_name = ?,
+                  visit_date = ?,
+                  field_visit_status = 'bekliyor',
+                  call_notes = ?,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+        args: [memberId || null, memberName, targetVisitDate, updatedNotes, lead.id]
+      });
+
+      stmts.push({
+        sql: `INSERT INTO call_logs (lead_id, caller_name, outcome, notes)
+              VALUES (?, ?, 'sahaya_paslandi', ?)`,
+        args: [lead.id, 'Yönetici (Admin)', `Olumsuz havuzundan ${memberName} personeline sahaya paslandı. ${admin_note || ''}`]
+      });
+    }
+
+    for (let i = 0; i < stmts.length; i += 50) {
+      await db.batch(stmts.slice(i, i + 50), 'write');
+    }
+
+    // Saha personeline bildirim gönder
+    try {
+      await db.run(`
+        INSERT INTO notifications (member_id, member_name, title, message, type, is_read)
+        VALUES (?, ?, ?, ?, 'field_assignment', 0)
+      `, memberId || null, memberName, '🚗 Yeni Saha Ziyaretleri Paslandı', `${leads.length} adet işletme olumsuz havuzundan size yüz yüze ziyaret için atandı.`);
+    } catch (e) {
+      console.warn('Notification insert error:', e.message);
+    }
+
+    invalidateCache();
+
+    res.json({
+      success: true,
+      count: leads.length,
+      field_member_name: memberName,
+      message: `${leads.length} işletme başarıyla ${memberName} personeline sahaya paslandı ve randevularına eklendi.`
+    });
+  } catch (err) {
+    console.error('batch-pass-to-field error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Olumsuz işletmeleri Mutlak Olumsuz'a al (Admin Nihai Arşivleme)
+router.post('/batch-to-mutlak-olumsuz', async (req, res) => {
+  try {
+    const { lead_ids, admin_note } = req.body;
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ error: 'Lütfen mutlak olumsuza alınacak işletmeleri seçiniz.' });
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
+    const timeStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+
+    const noteToAppend = `\nYönetici (Admin) [${dateStr} ${timeStr}]: Değerlendirme sonucu Mutlak Olumsuz (Arşiv) durumuna alındı. ${admin_note ? 'Gerekçe: ' + admin_note : ''}`;
+
+    const placeholders = lead_ids.map(() => '?').join(',');
+    const leads = await db.all(`SELECT id, name, call_notes FROM leads WHERE id IN (${placeholders})`, ...lead_ids);
+
+    const stmts = [];
+    for (const lead of leads) {
+      const updatedNotes = (lead.call_notes || '') + noteToAppend;
+      stmts.push({
+        sql: `UPDATE leads 
+              SET status = 'mutlak_olumsuz',
+                  call_notes = ?,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+        args: [updatedNotes, lead.id]
+      });
+
+      stmts.push({
+        sql: `INSERT INTO call_logs (lead_id, caller_name, outcome, notes)
+              VALUES (?, ?, 'mutlak_olumsuz', ?)`,
+        args: [lead.id, 'Yönetici (Admin)', `Yönetici kararıyla Mutlak Olumsuz yapıldı. ${admin_note || ''}`]
+      });
+    }
+
+    for (let i = 0; i < stmts.length; i += 50) {
+      await db.batch(stmts.slice(i, i + 50), 'write');
+    }
+
+    invalidateCache();
+
+    res.json({
+      success: true,
+      count: leads.length,
+      message: `${leads.length} işletme Mutlak Olumsuz olarak arşivlendi.`
+    });
+  } catch (err) {
+    console.error('batch-to-mutlak-olumsuz error:', err);
     res.status(500).json({ error: err.message });
   }
 });

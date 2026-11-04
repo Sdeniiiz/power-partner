@@ -28,11 +28,20 @@ export const getFieldRoute = (params) => api.get('/leads/field-route', { params 
 export const reorderFieldRoute = (ordered_ids) => api.put('/leads/field-route/reorder', { ordered_ids }).then(res => res.data);
 export const assignToFieldRoute = (data) => api.post('/leads/field-route/assign', data).then(res => res.data);
 export const recordFieldVisit = (id, data) => api.post(`/leads/${id}/field-visit`, data).then(res => res.data);
+export const passLeadsToField = (data) => api.post('/leads/batch-pass-to-field', data).then(res => res.data);
+export const archiveLeadsToMutlakOlumsuz = (data) => api.post('/leads/batch-to-mutlak-olumsuz', data).then(res => res.data);
 export const deleteLead = (id) => api.delete(`/leads/${id}`).then(res => res.data);
 
 export const isFieldStaffRole = (role) => {
   if (!role || typeof role !== 'string') return false;
   return /saha/i.test(role);
+};
+
+export const isColdCallerRole = (role) => {
+  if (!role || typeof role !== 'string') return false;
+  // Saha satış personelleri sadece yüz yüze görüşmeye gider, telefon araması yapmaz
+  if (/saha/i.test(role)) return false;
+  return /soğuk|soguk|arama|tele|caller|çağrı|cagri/i.test(role);
 };
 
 export const isAdminOrManagerRole = (role) => {
