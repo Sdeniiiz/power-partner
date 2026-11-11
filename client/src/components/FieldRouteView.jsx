@@ -1154,9 +1154,19 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
                               💰 Satış Havuzu
                             </span>
                           )}
-                          {lead.status === 'mutlak_olumsuz' && (
+                          {(lead.status === 'olumsuz' || lead.status === 'mutlak_olumsuz') && (
                             <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
                               ✖ Olumsuz
+                            </span>
+                          )}
+                          {(lead.last_field_outcome === 'ziyaret_tekrar' || (activeTab === 'completed' && lead.status === 'randevu')) && (
+                            <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                              <span>🔄 Tekrar Ziyaret</span>
+                            </span>
+                          )}
+                          {lead.last_field_outcome === 'ziyaret_notu' && (
+                            <span className="bg-indigo-100 text-indigo-800 border border-indigo-300 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                              <span>📝 Ziyaret Notu</span>
                             </span>
                           )}
                         </div>
@@ -1474,7 +1484,7 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
                   className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <FileText className="w-4 h-4 shrink-0" />
-                  <span>📝 Sadece Notu Kaydet (Rota Kalsın)</span>
+                  <span>📝 Ziyaret Notu & Tamamla</span>
                 </button>
 
                 <button
@@ -1484,7 +1494,7 @@ export default function FieldRouteView({ currentUser, authUser, teamMembers = []
                   className="py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <Calendar className="w-4 h-4 shrink-0" />
-                  <span>🔄 Tekrar Ziyaret Edilecek</span>
+                  <span>🔄 Tekrar Ziyaret Planla & Tamamla</span>
                 </button>
 
                 <button

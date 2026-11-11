@@ -678,6 +678,27 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                 ) : null}
               </button>
 
+              {/* 2.5 WhatsApp İsteyenler */}
+              <button
+                type="button"
+                onClick={() => setActiveCallTab('whatsapp')}
+                className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeCallTab === 'whatsapp'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-emerald-500" />
+                <span>WhatsApp İsteyenler</span>
+                {leadStats?.whatsapp ? (
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    activeCallTab === 'whatsapp' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {leadStats.whatsapp}
+                  </span>
+                ) : null}
+              </button>
+
               {/* 3. Randevu Alınanlar (Ziyaret) */}
               <button
                 type="button"

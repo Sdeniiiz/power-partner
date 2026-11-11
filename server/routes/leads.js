@@ -26,6 +26,7 @@ const getCachedStats = async (callerId = null) => {
       SUM(CASE WHEN status = 'mutlak_olumsuz' THEN 1 ELSE 0 END) as mutlak_olumsuz,
       SUM(CASE WHEN status = 'satis_havuzu' THEN 1 ELSE 0 END) as satis_havuzu,
       SUM(CASE WHEN status = 'is_dagitildi' THEN 1 ELSE 0 END) as is_dagitildi,
+      SUM(CASE WHEN status = 'whatsapp' OR id IN (SELECT DISTINCT lead_id FROM call_logs WHERE outcome = 'whatsapp_bilgi') THEN 1 ELSE 0 END) as whatsapp,
       SUM(CASE WHEN status = 'randevu_arama' AND recall_date <= DATE('now', 'localtime') THEN 1 ELSE 0 END) as today_recalls
     FROM leads
   `;
@@ -847,6 +848,24 @@ router.get('/admin-cockpit', async (req, res) => {
     );
     const todaySalesTotalTL = todayJobsRes.reduce((sum, j) => sum + (Number(j.sale_price) || 0), 0);
 
+    // d) WhatsApp üzerinden bilgi ve teklif isteyen işletmeler
+    const whatsappLeadsRes = await db.all(`
+      SELECT 
+        l.id, l.name, l.phone, l.raw_phone, l.district, l.city, l.category, l.status, l.score,
+        l.call_notes, l.assigned_caller_name,
+        cl.id as log_id, cl.caller_name, cl.notes as latest_note, cl.created_at as request_date
+      FROM leads l
+      JOIN (
+        SELECT lead_id, MAX(id) as max_id
+        FROM call_logs
+        WHERE outcome = 'whatsapp_bilgi'
+        GROUP BY lead_id
+      ) latest_cl ON l.id = latest_cl.lead_id
+      JOIN call_logs cl ON cl.id = latest_cl.max_id
+      ORDER BY cl.id DESC
+      LIMIT 100
+    `);
+
     // 2. SOĞUK ARAMA PERSONEL KARNESİ (Bahar & Aslı Öncelikli)
     const callLogsInRange = await db.all(
       `SELECT cl.*, l.name as lead_name, l.district as lead_district, l.phone as lead_phone
@@ -1232,8 +1251,10 @@ router.get('/admin-cockpit', async (req, res) => {
         period_field_visits_list: periodFieldVisitsRes,
         today_sales_count: todaySalesLogs.length,
         today_sales_total_tl: todaySalesTotalTL,
+        whatsapp_requests_count: whatsappLeadsRes.length,
         red_flags_count: overdueRecalls.length + overdueFieldVisitsTotal
       },
+      whatsapp_leads: whatsappLeadsRes,
       cold_callers_performance: coldCallersPerformance,
       field_sales_performance: fieldSalesPerformance,
       field_sold_jobs: fieldSoldJobs,
@@ -1466,8 +1487,12 @@ router.get('/', async (req, res) => {
     const params = [];
 
     if (status && status !== 'all') {
-      query += ' AND status = ?';
-      params.push(status);
+      if (status === 'whatsapp') {
+        query += " AND (status = 'whatsapp' OR id IN (SELECT DISTINCT lead_id FROM call_logs WHERE outcome = 'whatsapp_bilgi'))";
+      } else {
+        query += ' AND status = ?';
+        params.push(status);
+      }
     }
     if (district && district !== 'all') {
       query += ' AND district = ?';
@@ -1652,7 +1677,14 @@ router.get('/field-route', async (req, res) => {
           (SELECT SUBSTR(cl.created_at, 1, 10) 
            FROM call_logs cl 
            WHERE cl.lead_id = l.id 
-             AND (cl.outcome LIKE 'ziyaret%' OR cl.outcome = 'satis' OR cl.caller_name LIKE '%Yiğit%' OR cl.caller_name LIKE '%Saha%') 
+             AND (
+               cl.outcome LIKE 'ziyaret%' 
+               OR cl.outcome IN ('satis', 'randevu')
+               OR cl.notes LIKE '%(Saha)%' 
+               OR cl.caller_name IN (SELECT name FROM team_members WHERE LOWER(role) LIKE '%saha%')
+               OR LOWER(cl.caller_name) LIKE '%berat%'
+               OR LOWER(cl.caller_name) LIKE '%yiğit%'
+             ) 
            ORDER BY cl.id DESC LIMIT 1),
           CASE 
             WHEN l.last_called_at IS NOT NULL AND length(l.last_called_at) >= 10 THEN SUBSTR(l.last_called_at, 1, 10)
@@ -1660,9 +1692,12 @@ router.get('/field-route', async (req, res) => {
             WHEN l.visit_date IS NOT NULL AND length(l.visit_date) >= 10 THEN SUBSTR(l.visit_date, 1, 10)
             ELSE NULL
           END
-        ) as completed_date
+        ) as completed_date,
+        (SELECT cl.notes FROM call_logs cl WHERE cl.lead_id = l.id AND (cl.outcome LIKE 'ziyaret%' OR cl.notes LIKE '%(Saha)%') ORDER BY cl.id DESC LIMIT 1) as last_field_note,
+        (SELECT cl.outcome FROM call_logs cl WHERE cl.lead_id = l.id AND (cl.outcome LIKE 'ziyaret%' OR cl.notes LIKE '%(Saha)%') ORDER BY cl.id DESC LIMIT 1) as last_field_outcome,
+        (SELECT cl.caller_name FROM call_logs cl WHERE cl.lead_id = l.id AND (cl.outcome LIKE 'ziyaret%' OR cl.notes LIKE '%(Saha)%') ORDER BY cl.id DESC LIMIT 1) as last_field_caller
       FROM leads l 
-      WHERE (l.status = 'randevu' OR l.field_member_id IS NOT NULL)
+      WHERE (l.status = 'randevu' OR l.field_member_id IS NOT NULL OR l.field_visit_status = 'ziyaret_edildi')
     `;
     const params = [];
 
@@ -1895,7 +1930,7 @@ router.post('/:id/call', async (req, res) => {
     if (outcome === 'olumsuz' || outcome === 'mutlak_olumsuz') newStatus = 'olumsuz';
     else if (outcome === 'kesin_mutlak_olumsuz' || outcome === 'mutlak_olumsuz_admin') newStatus = 'mutlak_olumsuz';
     else if (outcome === 'iletisimsiz' || outcome === 'konusulmadi') newStatus = 'iletisimsiz';
-    else if (outcome === 'whatsapp_bilgi') newStatus = 'randevu_arama'; // WhatsApp'tan bilgi isteyenler takipte
+    else if (outcome === 'whatsapp_bilgi') newStatus = 'whatsapp'; // WhatsApp'tan bilgi isteyenler için özel durum
     else if (outcome === 'randevu') newStatus = 'randevu';
     else if (outcome === 'randevu_arama') newStatus = 'randevu_arama'; // ⭐ Arama Randevusu
     else if (outcome === 'ziyaret_olumlu') newStatus = 'satis_havuzu';
@@ -2088,7 +2123,25 @@ router.post('/:id/field-visit', async (req, res) => {
     const lead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
     if (!lead) return res.status(404).json({ error: 'İşletme bulunamadı.' });
 
-    const author = (visitor_name || lead.field_member_name || 'Saha Personeli').trim();
+    // Ziyareti gerçekleştiren saha personelini tespit et ve lead'e bağla
+    let visitorMember = null;
+    if (visitor_name && visitor_name.trim()) {
+      visitorMember = await db.get(
+        'SELECT id, name, role FROM team_members WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1',
+        visitor_name.trim()
+      );
+      if (!visitorMember) {
+        visitorMember = await db.get(
+          'SELECT id, name, role FROM team_members WHERE LOWER(name) LIKE LOWER(?) LIMIT 1',
+          `%${visitor_name.trim()}%`
+        );
+      }
+    }
+
+    const assignedFieldId = visitorMember?.id || lead.field_member_id;
+    const assignedFieldName = visitorMember?.name || (visitor_name || lead.field_member_name || 'Saha Personeli').trim();
+    const author = assignedFieldName;
+
     const now = new Date();
     const dateStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
     const timeStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
@@ -2103,20 +2156,20 @@ router.post('/:id/field-visit', async (req, res) => {
       logOutcome = 'ziyaret_olumlu';
     } else if (outcome === 'tekrar_ziyaret') {
       newStatus = 'randevu';
-      newVisitStatus = 'bekliyor';
-      logOutcome = 'randevu';
+      newVisitStatus = 'ziyaret_edildi'; // Bugünün ziyareti tamamlandı, sonraki tarih visit_date'e yazılır
+      logOutcome = 'ziyaret_tekrar';
     } else if (outcome === 'randevu_arama') {
       newStatus = 'randevu_arama';
       newVisitStatus = 'ziyaret_edildi';
       logOutcome = 'randevu_arama';
     } else if (outcome === 'ziyaret_olumsuz') {
-      newStatus = 'mutlak_olumsuz';
+      newStatus = 'olumsuz'; // Olumsuza aktar
       newVisitStatus = 'ziyaret_edildi';
       logOutcome = 'ziyaret_olumsuz';
     } else if (outcome === 'sadece_not') {
       newStatus = lead.status;
-      newVisitStatus = lead.field_visit_status || 'bekliyor';
-      logOutcome = 'randevu';
+      newVisitStatus = 'ziyaret_edildi'; // Not yazılıp kaydedildiğinde bugünkü ziyaret tamamlanmış sayılır
+      logOutcome = 'ziyaret_notu';
     }
 
     let formattedNote = '';
@@ -2128,7 +2181,8 @@ router.post('/:id/field-visit', async (req, res) => {
         ziyaret_olumlu: 'Saha ziyareti olumlu tamamlandı, satış havuzuna aktarıldı.',
         tekrar_ziyaret: 'Saha ziyareti yapıldı, tekrar ziyaret edilecek.',
         randevu_arama: 'Saha ziyareti yapıldı, telefonla tekrar aranacak.',
-        ziyaret_olumsuz: 'Saha ziyareti olumsuz sonuçlandı.'
+        ziyaret_olumsuz: 'Saha ziyareti olumsuz sonuçlandı.',
+        sadece_not: 'Saha ziyareti gerçekleştirildi ve ziyaret notu kaydedildi.'
       };
       formattedNote = `${author} (Saha) [${dateStr} ${timeStr}]: ${labelMap[outcome] || 'Saha ziyareti gerçekleştirildi.'}`;
     }
@@ -2149,6 +2203,8 @@ router.post('/:id/field-visit', async (req, res) => {
        SET status = ?,
            call_notes = ?,
            field_visit_status = ?,
+           field_member_id = COALESCE(?, field_member_id),
+           field_member_name = COALESCE(?, field_member_name),
            visit_date = CASE WHEN ? IS NOT NULL THEN ? ELSE visit_date END,
            recall_date = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_date END,
            recall_time = CASE WHEN ? IS NOT NULL THEN ? ELSE recall_time END,
@@ -2161,6 +2217,8 @@ router.post('/:id/field-visit', async (req, res) => {
       newStatus,
       newCallNotes,
       newVisitStatus,
+      assignedFieldId || null,
+      assignedFieldName || null,
       next_visit_date || null, next_visit_date || null,
       recall_date || null, recall_date || null,
       recall_time || null, recall_time || null,

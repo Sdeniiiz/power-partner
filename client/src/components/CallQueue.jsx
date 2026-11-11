@@ -755,6 +755,23 @@ export default function CallQueue({
           </button>
 
           <button
+            onClick={() => setStatusFilter('whatsapp')}
+            className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+              statusFilter === 'whatsapp'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-emerald-500" />
+            <span>WhatsApp İsteyenler</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+              statusFilter === 'whatsapp' ? 'bg-white/25 text-white' : 'bg-emerald-100 text-emerald-800'
+            }`}>
+              {leadStats?.whatsapp ?? 0}
+            </span>
+          </button>
+
+          <button
             onClick={() => setStatusFilter('randevu')}
             className={`text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
               statusFilter === 'randevu'

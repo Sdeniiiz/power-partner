@@ -26,6 +26,7 @@ import {
   ArrowUpRight,
   Sparkles,
   PhoneOff,
+  MessageSquare,
   X
 } from 'lucide-react';
 import { getAdminCockpit, getBulutfonDialUrl, triggerBulutfonCallApi, isFieldStaffRole } from '../api';
@@ -97,8 +98,26 @@ export default function AdminCockpit({
   const unreachableRecovery = data?.red_flags?.unreachable_recovery || [];
   const outcomeDist = data?.charts?.outcome_distribution || {};
   const totalCalls = data?.charts?.total_calls || 0;
+  const whatsappLeads = data?.whatsapp_leads || [];
+  const [whatsappCallerFilter, setWhatsappCallerFilter] = useState('all');
 
   // Filtreleme
+  const filteredWhatsappLeads = whatsappLeads.filter(w => {
+    if (whatsappCallerFilter !== 'all' && (w.caller_name || '').toLowerCase() !== whatsappCallerFilter.toLowerCase()) {
+      return false;
+    }
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase().trim();
+    return (
+      (w.name || '').toLowerCase().includes(term) ||
+      (w.district || '').toLowerCase().includes(term) ||
+      (w.phone || '').toLowerCase().includes(term) ||
+      (w.caller_name || '').toLowerCase().includes(term) ||
+      (w.latest_note || '').toLowerCase().includes(term) ||
+      (w.call_notes || '').toLowerCase().includes(term)
+    );
+  });
+
   const filteredSoldJobs = soldJobs.filter(j => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase().trim();
@@ -189,8 +208,8 @@ export default function AdminCockpit({
         </div>
       </div>
 
-      {/* 2. GÜNÜN CANLI NABZI (4 BÜYÜK KPI KARTI) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {/* 2. GÜNÜN CANLI NABZI (5 BÜYÜK KPI KARTI) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5">
         
         {/* KPI 1: Yapılan Arama Sayısı (Personel Bazlı ve Toplam) */}
         <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs relative overflow-hidden group hover:border-blue-300 transition-all">
@@ -288,7 +307,34 @@ export default function AdminCockpit({
           </div>
         </div>
 
-        {/* KPI 3: Kapanan Satışlar & Ciro */}
+        {/* KPI 3: 💬 WhatsApp'tan Bilgi İsteyenler */}
+        <div 
+          onClick={() => setActiveSubTab('whatsapp')}
+          className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs relative overflow-hidden group hover:border-emerald-500 hover:shadow-md transition-all cursor-pointer"
+          title="Tıklayarak WhatsApp üzerinden bilgi/teklif isteyen işletmelerin listesini açın"
+        >
+          <div className="absolute top-0 left-0 h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-green-600"></div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+              💬 WhatsApp İsteyenler
+            </span>
+            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-2xl group-hover:scale-110 transition-transform">
+              <MessageSquare className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-black text-emerald-700">
+              {whatsappLeads.length}
+            </span>
+            <span className="text-xs text-slate-500 font-semibold">işletme bilgi bekliyor</span>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold text-slate-600">
+            <span>Katalog / Teklif Talebi</span>
+            <span className="text-emerald-700 font-extrabold group-hover:underline">Listeyi Gör →</span>
+          </div>
+        </div>
+
+        {/* KPI 4: Kapanan Satışlar & Ciro */}
         <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs relative overflow-hidden group hover:border-purple-300 transition-all">
           <div className="absolute top-0 left-0 h-1.5 w-full bg-gradient-to-r from-purple-500 to-pink-600"></div>
           <div className="flex items-center justify-between">
@@ -313,7 +359,7 @@ export default function AdminCockpit({
           </div>
         </div>
 
-        {/* KPI 4: Kırmızı Bayrak Alarmları */}
+        {/* KPI 5: Kırmızı Bayrak Alarmları */}
         <div className={`rounded-3xl p-4 sm:p-5 border shadow-xs relative overflow-hidden group transition-all ${
           pulse.red_flags_count > 0 
             ? 'bg-rose-50/70 border-rose-200 hover:border-rose-300' 
@@ -349,6 +395,7 @@ export default function AdminCockpit({
         {[
           { id: 'overview', label: '📊 Genel Bakış & Grafikler', icon: BarChart3 },
           { id: 'callers', label: `👩‍💼 Soğuk Arama Ekibi (${coldCallers.length})`, icon: PhoneCall },
+          { id: 'whatsapp', label: `💬 WhatsApp İsteyenler (${whatsappLeads.length})`, icon: MessageSquare },
           { id: 'field', label: `🚗 Saha Satış Ekibi (${fieldStaff.length})`, icon: MapPin },
           { id: 'sold_jobs', label: `🎉 Sahada Satılan İşler (${soldJobs.length})`, icon: Award },
           { id: 'alerts', label: `⚠️ Alarmlar & Kaçaklar (${overdueRecalls.length + unreachableRecovery.length})`, icon: AlertTriangle },
@@ -453,7 +500,14 @@ export default function AdminCockpit({
                       <span className="text-[10px] text-amber-700 font-bold block">⏰ Randevu</span>
                       <strong className="text-xs font-black text-amber-950">{caller.recall_count}</strong>
                     </div>
-                    <div className="bg-white/80 rounded-xl p-1.5 border border-slate-200/60">
+                    <div 
+                      onClick={() => {
+                        setWhatsappCallerFilter(caller.name);
+                        setActiveSubTab('whatsapp');
+                      }}
+                      className="bg-white/80 rounded-xl p-1.5 border border-slate-200/60 cursor-pointer hover:bg-emerald-50 hover:border-emerald-300 transition-all"
+                      title="Bu personelin WhatsApp bilgi taleplerini filtrele ve gör"
+                    >
                       <span className="text-[10px] text-emerald-700 font-bold block">💬 WhatsApp</span>
                       <strong className="text-xs font-black text-emerald-950">{caller.whatsapp_count || 0}</strong>
                     </div>
@@ -665,6 +719,65 @@ export default function AdminCockpit({
             )}
           </div>
 
+          {/* WhatsApp Bilgi İsteyenler Önizleme */}
+          {whatsappLeads.length > 0 && (
+            <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-emerald-600" />
+                    <span>WhatsApp'tan Bilgi ve Sunum Bekleyen İşletmeler ({whatsappLeads.length})</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Soğuk arama personellerinin WhatsApp'tan teklif veya katalog göndermek üzere kaydettiği işletmeler.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('whatsapp')}
+                  className="text-xs font-black text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <span>Tümünü Gör ({whatsappLeads.length})</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {whatsappLeads.slice(0, 4).map(item => {
+                  const cleanPhone = (item.raw_phone || item.phone || '').replace(/\D/g, '');
+                  const waNumber = cleanPhone.startsWith('90') ? cleanPhone : cleanPhone.startsWith('0') ? '9' + cleanPhone : '90' + cleanPhone;
+                  const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(`Merhaba ${item.name}, Power Partner adına arama yapmıştık.`)}`;
+
+                  return (
+                    <div key={item.log_id || item.id} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2 flex flex-col justify-between hover:border-emerald-300 transition-all">
+                      <div>
+                        <div className="flex items-start justify-between gap-1">
+                          <h4 className="text-xs font-black text-slate-900 truncate" title={item.name}>{item.name}</h4>
+                          <span className="text-[10px] font-bold text-slate-500 shrink-0">📍 {item.district || 'Samsun'}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-1 line-clamp-2 bg-white p-1.5 rounded-lg border border-slate-200/60">
+                          {item.latest_note || 'WhatsApp üzerinden bilgi istedi.'}
+                        </p>
+                      </div>
+                      <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-500">📞 {item.caller_name || 'Bahar'}</span>
+                        <a
+                          href={waUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs"
+                        >
+                          <MessageSquare className="w-3 h-3" />
+                          <span>WhatsApp</span>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
@@ -828,6 +941,182 @@ export default function AdminCockpit({
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* SEKMELER: 2.5 WHATSAPP BİLGİ İSTEYENLER */}
+      {/* ========================================================= */}
+      {activeSubTab === 'whatsapp' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-emerald-600" />
+                  <span>WhatsApp'tan Bilgi ve Teklif İsteyen İşletmeler</span>
+                  <span className="bg-emerald-100 text-emerald-800 text-xs font-black px-2.5 py-0.5 rounded-full">
+                    {whatsappLeads.length} İşletme
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Soğuk arama esnasında detaylı sunum, katalog veya fiyat teklifinin WhatsApp üzerinden gönderilmesini isteyen işletmeler.
+                </p>
+              </div>
+
+              {/* Arama Inputu */}
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="İşletme, ilçe, not veya tel ara..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden font-semibold text-slate-800"
+                />
+              </div>
+            </div>
+
+            {/* Personel Filtresi */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
+              <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider mr-1">
+                Arayan Personel:
+              </span>
+              <button
+                type="button"
+                onClick={() => setWhatsappCallerFilter('all')}
+                className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                  whatsappCallerFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Tümü ({whatsappLeads.length})
+              </button>
+              {Array.from(new Set(whatsappLeads.map(w => w.caller_name).filter(Boolean))).map(name => {
+                const count = whatsappLeads.filter(w => w.caller_name === name).length;
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => setWhatsappCallerFilter(name)}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all cursor-pointer capitalize ${
+                      whatsappCallerFilter === name
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {name} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredWhatsappLeads.length === 0 ? (
+              <div className="text-center py-12 text-slate-400 text-xs">
+                Arama kriterlerine uygun WhatsApp bilgi talebi bulunamadı.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2">
+                {filteredWhatsappLeads.map(item => {
+                  const cleanPhone = (item.raw_phone || item.phone || '').replace(/\D/g, '');
+                  const waNumber = cleanPhone.startsWith('90')
+                    ? cleanPhone
+                    : cleanPhone.startsWith('0')
+                    ? '9' + cleanPhone
+                    : '90' + cleanPhone;
+                  const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(`Merhaba ${item.name}, Power Partner adına arama yapmıştık. İstediğiniz detaylı bilgileri ve sunumu paylaşıyoruz.`)}`;
+
+                  return (
+                    <div
+                      key={item.log_id || item.id}
+                      className="bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 rounded-2xl p-4 border border-slate-200/90 shadow-2xs hover:border-emerald-300 hover:shadow-xs transition-all space-y-3 flex flex-col justify-between"
+                    >
+                      <div className="space-y-2">
+                        {/* Üst Bilgi Rozetleri */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 leading-snug">
+                              {item.name}
+                            </h4>
+                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                              {item.district && (
+                                <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-black px-2 py-0.5 rounded-md">
+                                  📍 {item.district}
+                                </span>
+                              )}
+                              {item.category && (
+                                <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                  {item.category}
+                                </span>
+                              )}
+                              <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-md">
+                                💬 WhatsApp İstedi
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-[10px] font-bold text-slate-400 block">
+                              Arayan:
+                            </span>
+                            <span className="text-xs font-black text-slate-800 capitalize">
+                              {item.caller_name || 'Bahar'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Personelin Yazdığı Talep Notu */}
+                        <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-2.5 text-xs text-emerald-950 font-medium">
+                          <span className="font-extrabold text-emerald-900 block mb-0.5 text-[11px]">
+                            📝 Görüşme Notu & Talep:
+                          </span>
+                          <p className="line-clamp-3">
+                            {item.latest_note || item.call_notes || 'WhatsApp üzerinden bilgilendirme ve teklif istedi.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Alt Aksiyon Butonları & Telefon */}
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 text-xs font-black text-slate-800">
+                          <PhoneCall className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{item.phone || 'Numara Yok'}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={waUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>WhatsApp Web Aç</span>
+                          </a>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (onOpenLeadInCallQueue) {
+                                onOpenLeadInCallQueue(item.id);
+                              } else if (onNavigateToTab) {
+                                onNavigateToTab('calls');
+                              }
+                            }}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-extrabold px-2.5 py-1.5 rounded-xl border border-slate-200 transition-all cursor-pointer"
+                            title="Kuyrukta Gör & Not Ekle"
+                          >
+                            Kuyrukta Aç
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
