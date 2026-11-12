@@ -10,6 +10,7 @@ import LoginModal from './components/LoginModal';
 import TodayRecallsModal from './components/TodayRecallsModal';
 import AssignedLeadsModal from './components/AssignedLeadsModal';
 import DailyActivityModal from './components/DailyActivityModal';
+import WhatsAppLeadsModal from './components/WhatsAppLeadsModal';
 import FieldRouteView from './components/FieldRouteView';
 import AdminCockpit from './components/AdminCockpit';
 import { getSettings, getLeads, getTeamMembers, getCategories, isFieldStaffRole, isAdminOrManagerRole } from './api';
@@ -32,6 +33,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTodayRecallsOpen, setIsTodayRecallsOpen] = useState(false);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [isDailyActivityOpen, setIsDailyActivityOpen] = useState(false);
   const [assignedLeadsNotif, setAssignedLeadsNotif] = useState(null);
   const [filterNotificationLeadIds, setFilterNotificationLeadIds] = useState(null);
@@ -126,6 +128,7 @@ export default function App() {
         onLogout={handleLogout}
         onUpdateAuthUser={handleUpdateAuthUser}
         onOpenTodayRecalls={() => setIsTodayRecallsOpen(true)}
+        onOpenWhatsAppLeads={() => setIsWhatsAppModalOpen(true)}
         onOpenAssignedLeads={(notif) => setAssignedLeadsNotif(notif)}
         onOpenDailyActivity={() => setIsDailyActivityOpen(true)}
       />
@@ -168,6 +171,7 @@ export default function App() {
             onClearNotificationFilter={() => setFilterNotificationLeadIds(null)}
             activityDateFilter={activityDateFilter}
             onActivityDateChange={setActivityDateFilter}
+            onOpenWhatsAppLeads={() => setIsWhatsAppModalOpen(true)}
           />
         )}
 
@@ -187,6 +191,7 @@ export default function App() {
             teamMembers={teamMembers}
             authUser={authUser}
             onJobUpdated={refreshGlobalData}
+            onOpenWhatsAppLeads={() => setIsWhatsAppModalOpen(true)}
           />
         )}
 
@@ -224,6 +229,19 @@ export default function App() {
         authUser={authUser}
         currentUser={currentUser}
         onLeadUpdated={refreshGlobalData}
+      />
+
+      {/* WhatsApp Mesaj & Bilgi İsteyen İşletmeler Modalı (Tüm Personeller) */}
+      <WhatsAppLeadsModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        authUser={authUser}
+        currentUser={currentUser}
+        onLeadUpdated={refreshGlobalData}
+        onOpenLeadInCallQueue={(leadId) => {
+          setFilterNotificationLeadIds([leadId]);
+          setActiveTab('calls');
+        }}
       />
 
       {/* Yeni Atanan Aramalar & İşletmeler Modalı */}

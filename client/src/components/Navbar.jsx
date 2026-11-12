@@ -17,6 +17,7 @@ import {
   Bell,
   CheckCheck,
   Phone,
+  MessageSquare,
   Navigation
 } from 'lucide-react';
 import { getNotifications, markNotificationsRead, updateUserBulutfon, isFieldStaffRole, isAdminOrManagerRole } from '../api';
@@ -34,6 +35,7 @@ export default function Navbar({
   onLogout,
   onUpdateAuthUser,
   onOpenTodayRecalls,
+  onOpenWhatsAppLeads,
   onOpenAssignedLeads,
   onOpenDailyActivity
 }) {
@@ -336,6 +338,22 @@ export default function Navbar({
           {/* Sağ Alan: Aktif Kullanıcı & Ayarlar & Çıkış */}
           <div className="flex items-center gap-1.5 shrink-0 z-30">
             
+            {/* WhatsApp Mesaj / Bilgi İsteyenler Butonu (Arama personelleri ve tüm ekip) */}
+            <button
+              type="button"
+              onClick={onOpenWhatsAppLeads}
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-black transition-all bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs cursor-pointer shrink-0 active:scale-95"
+              title="WhatsApp üzerinden bilgi ve sunum isteyen işletmeleri listele"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden sm:inline">WhatsApp</span>
+              {stats?.whatsapp > 0 && (
+                <span className="bg-emerald-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
+                  {stats.whatsapp}
+                </span>
+              )}
+            </button>
+
             {/* Bildirim Çanı & Menüsü (Step 2 - 🔔) */}
             <div className="relative shrink-0" ref={notifMenuRef}>
               <button

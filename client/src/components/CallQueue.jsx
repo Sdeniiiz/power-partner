@@ -46,7 +46,8 @@ export default function CallQueue({
   filterNotificationLeadIds,
   onClearNotificationFilter,
   activityDateFilter: propActivityDateFilter,
-  onActivityDateChange
+  onActivityDateChange,
+  onOpenWhatsAppLeads
 }) {
   const isAdmin = authUser?.role === 'admin';
   const [leads, setLeads] = useState([]);
@@ -644,6 +645,29 @@ export default function CallQueue({
               </div>
             </div>
           </div>
+
+          {/* 2.5 WhatsApp Bilgi İsteyenler */}
+          <button
+            type="button"
+            onClick={onOpenWhatsAppLeads || (() => setStatusFilter('whatsapp'))}
+            className="bg-emerald-50/80 hover:bg-emerald-100/90 border border-emerald-300 rounded-2xl px-3 py-2 flex items-center gap-2.5 shadow-2xs transition-all cursor-pointer text-left"
+            title="WhatsApp üzerinden bilgi ve sunum isteyen işletmeleri görüntüle"
+          >
+            <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-2xs">
+              💬
+            </div>
+            <div>
+              <div className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                <span>WhatsApp İsteyenler</span>
+              </div>
+              <div className="text-base font-black text-emerald-950 leading-tight">
+                {leadStats?.whatsapp ?? 0}
+                <span className="text-[11px] font-semibold text-emerald-700/80 ml-1">
+                  İşletme
+                </span>
+              </div>
+            </div>
+          </button>
 
           {/* 3. Yarınki Randevu Durumu & Takvim Butonu */}
           <button
@@ -1588,6 +1612,27 @@ export default function CallQueue({
                     <div className="mt-3 bg-purple-50 border border-purple-200 rounded-xl p-2.5 text-xs text-purple-900 font-semibold flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-purple-600 shrink-0" />
                       <span>Randevu: {new Date(lead.visit_date).toLocaleString('tr-TR')}</span>
+                    </div>
+                  )}
+
+                  {/* 💬 WhatsApp Bilgi / Sunum Talebi Varsa */}
+                  {lead.status === 'whatsapp' && (
+                    <div className="mt-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl p-2.5 text-xs font-bold flex items-center justify-between shadow-xs">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <MessageSquare className="w-4 h-4 text-emerald-200 shrink-0" />
+                        <span className="truncate">💬 Müşteri WhatsApp'tan Bilgi/Katalog İstedi</span>
+                      </div>
+                      {lead.whatsapp_link && (
+                        <a
+                          href={lead.whatsapp_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="bg-white text-emerald-700 hover:bg-emerald-50 px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all shadow-2xs shrink-0 ml-2"
+                        >
+                          <span>WhatsApp Aç</span>
+                          <span>→</span>
+                        </a>
+                      )}
                     </div>
                   )}
 

@@ -1274,6 +1274,43 @@ router.get('/admin-cockpit', async (req, res) => {
   }
 });
 
+// Arama personelleri ve yöneticiler için WhatsApp bilgi / teklif isteyen işletmeler
+router.get('/whatsapp-requests', async (req, res) => {
+  try {
+    const { caller_name, search } = req.query;
+    let query = `
+      SELECT 
+        l.id, l.name, l.phone, l.raw_phone, l.district, l.city, l.category, l.status, l.score,
+        l.call_notes, l.assigned_caller_name, l.assigned_caller_id,
+        cl.id as log_id, cl.caller_name, cl.notes as latest_note, cl.created_at as request_date
+      FROM leads l
+      JOIN (
+        SELECT lead_id, MAX(id) as max_id
+        FROM call_logs
+        WHERE outcome = 'whatsapp_bilgi'
+        GROUP BY lead_id
+      ) latest_cl ON l.id = latest_cl.lead_id
+      JOIN call_logs cl ON cl.id = latest_cl.max_id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (caller_name && caller_name !== 'all') {
+      query += ' AND LOWER(TRIM(cl.caller_name)) = LOWER(TRIM(?))';
+      params.push(caller_name.trim());
+    }
+    if (search && search.trim()) {
+      const q = `%${search.trim()}%`;
+      query += ' AND (l.name LIKE ? OR l.phone LIKE ? OR l.district LIKE ? OR cl.notes LIKE ?)';
+      params.push(q, q, q, q);
+    }
+    query += ' ORDER BY cl.id DESC LIMIT 300';
+    const rows = await db.all(query, ...params);
+    res.json({ success: true, count: rows.length, data: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Yüz yüze randevu (ziyaret) günlük kota ve doluluk takvimi (Maks 10 randevu kuralı)
 router.get('/appointment-capacity', async (req, res) => {
   try {
