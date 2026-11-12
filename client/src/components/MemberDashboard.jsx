@@ -317,7 +317,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
   };
 
   const downloadMemberICS = () => {
-    const activeWithDate = jobs.filter(j => j.status !== 'tamamlandi' && j.due_date);
+    const activeWithDate = jobs.filter(j => j.status !== 'tamamlandi' && j.status !== 'iptal_edildi' && j.due_date);
     if (!activeWithDate.length) {
       alert('Tarihi belirlenmiş aktif iş bulunamadı.');
       return;
@@ -346,7 +346,7 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
     document.body.removeChild(a);
   };
 
-  const activeJobs = jobs.filter(j => j.status !== 'tamamlandi');
+  const activeJobs = jobs.filter(j => j.status !== 'tamamlandi' && j.status !== 'iptal_edildi');
   const completedJobs = jobs.filter(j => j.status === 'tamamlandi');
 
   // Bugün aranacak randevu sayısı
@@ -1176,9 +1176,17 @@ export default function MemberDashboard({ currentUser, teamMembers = [], authUse
                           )}
                         </div>
 
-                        <h3 className="font-extrabold text-slate-900 text-base">
-                          {job.title}
-                        </h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-extrabold text-slate-900 text-base">
+                            {job.title}
+                          </h3>
+                          {job.status === 'haber_bekleniyor' && (
+                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <span>⏳</span>
+                              <span>Haber / Onay Bekleniyor</span>
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs font-bold text-slate-600 mt-1">
                           Müşteri: {job.lead_name} ({job.lead_district})
                         </p>

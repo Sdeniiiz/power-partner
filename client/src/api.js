@@ -31,6 +31,7 @@ export const assignToFieldRoute = (data) => api.post('/leads/field-route/assign'
 export const recordFieldVisit = (id, data) => api.post(`/leads/${id}/field-visit`, data).then(res => res.data);
 export const passLeadsToField = (data) => api.post('/leads/batch-pass-to-field', data).then(res => res.data);
 export const archiveLeadsToMutlakOlumsuz = (data) => api.post('/leads/batch-to-mutlak-olumsuz', data).then(res => res.data);
+export const updateSalesPoolLeadStatus = (id, data) => api.post(`/leads/${id}/sales-pool-status`, data).then(res => res.data);
 export const deleteLead = (id) => api.delete(`/leads/${id}`).then(res => res.data);
 
 export const isFieldStaffRole = (role) => {

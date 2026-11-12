@@ -618,6 +618,33 @@ router.put('/:id', async (req, res) => {
       jobId
     );
 
+    // Eğer iş iptal edilirken işletmenin durumu da olumsuz yapılmak istendiyse
+    if (nextStatus === 'iptal_edildi' && req.body.lead_status === 'olumsuz') {
+      const now = new Date();
+      const trDate = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const trTime = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      const author = req.body.user_name || 'Yönetici';
+      const cancelReason = req.body.cancel_reason || req.body.notes || 'İş iptal edildi';
+      const cancelNoteLine = `${author} [${trDate} ${trTime}]: ❌ İŞ İPTAL EDİLDİ & İŞLETME OLUMSUZA ALINDI - [${existing.title}] Sebep: ${cancelReason}`;
+
+      const lead = await db.get('SELECT call_notes FROM leads WHERE id = ?', existing.lead_id);
+      const updatedNotes = lead?.call_notes ? `${cancelNoteLine}\n${lead.call_notes}` : cancelNoteLine;
+
+      await db.run(
+        `UPDATE leads SET status = 'olumsuz', call_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        updatedNotes,
+        existing.lead_id
+      );
+
+      await db.run(
+        `INSERT INTO call_logs (lead_id, outcome, caller_name, notes, created_at)
+         VALUES (?, 'olumsuz', ?, ?, CURRENT_TIMESTAMP)`,
+        existing.lead_id,
+        author,
+        cancelNoteLine
+      );
+    }
+
     const updated = await db.get(`
       SELECT
         j.*,

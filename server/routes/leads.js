@@ -25,6 +25,7 @@ const getCachedStats = async (callerId = null) => {
       SUM(CASE WHEN status = 'olumsuz' THEN 1 ELSE 0 END) as olumsuz,
       SUM(CASE WHEN status = 'mutlak_olumsuz' THEN 1 ELSE 0 END) as mutlak_olumsuz,
       SUM(CASE WHEN status = 'satis_havuzu' THEN 1 ELSE 0 END) as satis_havuzu,
+      SUM(CASE WHEN status = 'haber_bekleniyor' THEN 1 ELSE 0 END) as haber_bekleniyor,
       SUM(CASE WHEN status = 'is_dagitildi' THEN 1 ELSE 0 END) as is_dagitildi,
       SUM(CASE WHEN status = 'whatsapp' OR id IN (SELECT DISTINCT lead_id FROM call_logs WHERE outcome = 'whatsapp_bilgi') THEN 1 ELSE 0 END) as whatsapp,
       SUM(CASE WHEN status = 'randevu_arama' AND recall_date <= DATE('now', 'localtime') THEN 1 ELSE 0 END) as today_recalls
@@ -1526,6 +1527,11 @@ router.get('/', async (req, res) => {
     if (status && status !== 'all') {
       if (status === 'whatsapp') {
         query += " AND (status = 'whatsapp' OR id IN (SELECT DISTINCT lead_id FROM call_logs WHERE outcome = 'whatsapp_bilgi'))";
+      } else if (status.includes(',')) {
+        const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+        const placeholders = statuses.map(() => '?').join(',');
+        query += ` AND status IN (${placeholders})`;
+        params.push(...statuses);
       } else {
         query += ' AND status = ?';
         params.push(status);
@@ -2362,6 +2368,98 @@ router.put('/batch/assign', async (req, res) => {
   }
 });
 
+
+// Satış havuzundaki işletmenin durumunu belirleme (Haber Bekleniyor, Olumsuz, Sahaya Pasla, Satışa Geri Al)
+router.post('/:id/sales-pool-status', async (req, res) => {
+  try {
+    const { status, notes, recall_date, reason, pass_to_field, field_member_id, user_name } = req.body;
+    const leadId = req.params.id;
+
+    const lead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
+    if (!lead) {
+      return res.status(404).json({ error: 'İşletme bulunamadı.' });
+    }
+
+    const now = new Date();
+    const trDate = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const trTime = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    const author = user_name || 'Yönetici';
+    
+    let newStatus = status;
+    let logOutcome = 'not';
+    let logNote = '';
+    let updatedFieldVisitStatus = lead.field_visit_status;
+    let targetFieldMemberId = lead.field_member_id;
+
+    if (status === 'haber_bekleniyor') {
+      newStatus = 'haber_bekleniyor';
+      logOutcome = 'haber_bekleniyor';
+      const cleanNote = (notes || '').trim();
+      logNote = `${author} [${trDate} ${trTime}]: ⏳ HABER BEKLENİYOR${recall_date ? ' (Tarih: ' + recall_date + ')' : ''} - ${cleanNote || 'Müşteriden haber bekleniyor.'}`;
+    } else if (status === 'olumsuz') {
+      if (pass_to_field) {
+        newStatus = 'randevu';
+        updatedFieldVisitStatus = 'bekliyor';
+        targetFieldMemberId = field_member_id || lead.field_member_id;
+        logOutcome = 'sahaya_paslandi';
+        const cleanNote = (notes || '').trim();
+        logNote = `${author} [${trDate} ${trTime}]: 🔁 SATIŞ HAVUZUNDAN SAHAYA PASLANDI: [Sebep: ${reason || 'Belirtilmedi'}] ${cleanNote ? '- ' + cleanNote : ''}`;
+      } else {
+        newStatus = 'olumsuz';
+        logOutcome = 'olumsuz';
+        const cleanNote = (notes || '').trim();
+        logNote = `${author} [${trDate} ${trTime}]: ❌ SATIŞ HAVUZUNDAN OLUMSUZA ALINDI: [Sebep: ${reason || 'Belirtilmedi'}] ${cleanNote ? '- ' + cleanNote : ''}`;
+      }
+    } else if (status === 'satis_havuzu') {
+      newStatus = 'satis_havuzu';
+      logOutcome = 'satis_havuzu';
+      const cleanNote = (notes || '').trim();
+      logNote = `${author} [${trDate} ${trTime}]: ✓ TEKRAR SATIŞ HAVUZUNA ALINDI - ${cleanNote || 'İş dağıtımına hazır'}`;
+    } else {
+      return res.status(400).json({ error: 'Geçersiz durum.' });
+    }
+
+    const updatedCallNotes = lead.call_notes ? `${logNote}\n${lead.call_notes}` : logNote;
+
+    await db.run(
+      `UPDATE leads
+       SET status = ?,
+           call_notes = ?,
+           recall_date = ?,
+           field_visit_status = ?,
+           field_member_id = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      newStatus,
+      updatedCallNotes,
+      recall_date || lead.recall_date || null,
+      updatedFieldVisitStatus,
+      targetFieldMemberId,
+      leadId
+    );
+
+    // Call log ekle
+    await db.run(
+      `INSERT INTO call_logs (lead_id, outcome, caller_name, notes, created_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      leadId,
+      logOutcome,
+      author,
+      logNote
+    );
+
+    invalidateCache();
+
+    const updatedLead = await db.get('SELECT * FROM leads WHERE id = ?', leadId);
+    res.json({
+      success: true,
+      message: 'İşletme durumu başarıyla güncellendi.',
+      data: updatedLead
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Tek işletme güncelle (Not, Puan, vb. hızlı düzenleme)
 router.put('/:id', async (req, res) => {

@@ -16,9 +16,16 @@ import {
   Trash2,
   Search,
   Pencil,
-  X
+  X,
+  XCircle,
+  AlertTriangle,
+  RotateCcw,
+  Check,
+  Send,
+  HelpCircle,
+  ChevronDown
 } from 'lucide-react';
-import { getLeads, getJobs, createJob, updateJob, deleteJob, getCategories, getTeamMembers, parseCallNote } from '../api';
+import { getLeads, getJobs, createJob, updateJob, deleteJob, getCategories, getTeamMembers, parseCallNote, updateSalesPoolLeadStatus, isFieldStaffRole } from '../api';
 import AdminCompletedFinanceSection from './AdminCompletedFinanceSection';
 
 // Kategori bazlı ürün/hizmet paketleri
@@ -63,6 +70,41 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
   const [customProductInput, setCustomProductInput] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // 1. Satış Havuzu Alt Filtresi (Dağıtım Bekleyenler / Haber Beklenenler / Tümü)
+  const [salesPoolSubTab, setSalesPoolSubTab] = useState('all'); // 'all' | 'satis_havuzu' | 'haber_bekleniyor'
+
+  // 2. Satış Havuzu: Haber Bekleniyor Modalı State
+  const [waitingNewsModalLead, setWaitingNewsModalLead] = useState(null);
+  const [waitingNewsDate, setWaitingNewsDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().split('T')[0];
+  });
+  const [waitingNewsNote, setWaitingNewsNote] = useState('');
+  const [savingWaitingNews, setSavingWaitingNews] = useState(false);
+
+  // 3. Satış Havuzu: Olumsuza Al Modalı State
+  const [negativeModalLead, setNegativeModalLead] = useState(null);
+  const [negativeReason, setNegativeReason] = useState('Fiyat yüksek bulundu');
+  const [negativeNote, setNegativeNote] = useState('');
+  const [negativePassToField, setNegativePassToField] = useState(false);
+  const [negativeFieldMemberId, setNegativeFieldMemberId] = useState('');
+  const [savingNegative, setSavingNegative] = useState(false);
+
+  // 4. İş Dağıtım Masası (Jobs): Tab Filtresi
+  const [jobsSubTab, setJobsSubTab] = useState('active'); // 'active' | 'haber_bekleniyor' | 'tamamlandi' | 'iptal_edildi' | 'all'
+
+  // 5. İş Dağıtım Masası: İşi İptal Et / Olumsuz Modalı State
+  const [cancelJobModalJob, setCancelJobModalJob] = useState(null);
+  const [cancelJobReason, setCancelJobReason] = useState('');
+  const [cancelJobAlsoNegativeLead, setCancelJobAlsoNegativeLead] = useState(false);
+  const [savingCancelJob, setSavingCancelJob] = useState(false);
+
+  // 6. İş Dağıtım Masası: İş İçin Haber Bekleniyor Modalı State
+  const [waitingJobModalJob, setWaitingJobModalJob] = useState(null);
+  const [waitingJobNote, setWaitingJobNote] = useState('');
+  const [savingWaitingJob, setSavingWaitingJob] = useState(false);
+
   const getDefaultDueDate = () => {
     const nextWeek = new Date();
     nextWeek.setDate(nextWeek.getDate() + 7);
@@ -73,7 +115,7 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
     setLoading(true);
     try {
       const [leadsRes, jobsRes, catsRes, membersRes] = await Promise.all([
-        getLeads({ status: 'satis_havuzu' }),
+        getLeads({ status: 'satis_havuzu,haber_bekleniyor' }),
         getJobs({
           category_id: selectedCategoryFilter === 'all' ? undefined : selectedCategoryFilter,
           member_id: selectedMemberFilter === 'all' ? undefined : selectedMemberFilter
@@ -294,6 +336,174 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
     }
   };
 
+  // 1. Satış Havuzu: Haber Bekleniyor Aç
+  const openWaitingNewsModal = (lead) => {
+    setWaitingNewsModalLead(lead);
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    setWaitingNewsDate(lead.recall_date ? String(lead.recall_date).split('T')[0] : d.toISOString().split('T')[0]);
+    setWaitingNewsNote('');
+  };
+
+  const handleSaveWaitingNews = async (e) => {
+    e.preventDefault();
+    if (!waitingNewsModalLead) return;
+    setSavingWaitingNews(true);
+    try {
+      await updateSalesPoolLeadStatus(waitingNewsModalLead.id, {
+        status: 'haber_bekleniyor',
+        notes: waitingNewsNote,
+        recall_date: waitingNewsDate,
+        user_name: authUser?.name || currentUser?.name || 'Yönetici'
+      });
+      setSuccessNotice(`"${waitingNewsModalLead.name}" için haber bekleme durumu ve notu kaydedildi.`);
+      setWaitingNewsModalLead(null);
+      loadData();
+      if (onJobCreated) onJobCreated();
+      setTimeout(() => setSuccessNotice(''), 4000);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setSavingWaitingNews(false);
+    }
+  };
+
+  // 2. Satış Havuzu: Olumsuza Al Aç
+  const openNegativeModal = (lead) => {
+    setNegativeModalLead(lead);
+    setNegativeReason('Fiyat yüksek bulundu');
+    setNegativeNote('');
+    setNegativePassToField(false);
+    const fieldMembers = teamMembers.filter(m => isFieldStaffRole(m.role));
+    setNegativeFieldMemberId(lead.field_member_id || fieldMembers[0]?.id || '');
+  };
+
+  const handleSaveNegative = async (e) => {
+    e.preventDefault();
+    if (!negativeModalLead) return;
+    setSavingNegative(true);
+    try {
+      await updateSalesPoolLeadStatus(negativeModalLead.id, {
+        status: 'olumsuz',
+        reason: negativeReason,
+        notes: negativeNote,
+        pass_to_field: negativePassToField,
+        field_member_id: negativePassToField ? negativeFieldMemberId : undefined,
+        user_name: authUser?.name || currentUser?.name || 'Yönetici'
+      });
+      const msg = negativePassToField
+        ? `"${negativeModalLead.name}" sahaya ziyaret görevi olarak paslandı.`
+        : `"${negativeModalLead.name}" Satış Havuzundan Olumsuz havuzuna aktarıldı.`;
+      setSuccessNotice(msg);
+      setNegativeModalLead(null);
+      loadData();
+      if (onJobCreated) onJobCreated();
+      setTimeout(() => setSuccessNotice(''), 4000);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setSavingNegative(false);
+    }
+  };
+
+  // 3. Satış Havuzu: Haber Beklenenden Tekrar Satışa Aktar
+  const handleReactivateToSalesPool = async (lead) => {
+    try {
+      await updateSalesPoolLeadStatus(lead.id, {
+        status: 'satis_havuzu',
+        notes: 'Haber beklemeden tekrar satış havuzuna alındı',
+        user_name: authUser?.name || currentUser?.name || 'Yönetici'
+      });
+      setSuccessNotice(`"${lead.name}" tekrar aktif Satış Havuzuna alındı.`);
+      loadData();
+      if (onJobCreated) onJobCreated();
+      setTimeout(() => setSuccessNotice(''), 4000);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
+    }
+  };
+
+  // 4. İş Durum Değişikliği Tetikleyicisi (İş Masası)
+  const handleJobStatusChange = (job, newStatus) => {
+    if (newStatus === 'haber_bekleniyor') {
+      setWaitingJobModalJob(job);
+      setWaitingJobNote('');
+    } else if (newStatus === 'iptal_edildi') {
+      setCancelJobModalJob(job);
+      setCancelJobReason('');
+      setCancelJobAlsoNegativeLead(false);
+    } else {
+      handleUpdateStatus(job.id, newStatus);
+    }
+  };
+
+  // 5. İş: Haber Bekleniyor Kaydet
+  const handleSaveWaitingJob = async (e) => {
+    e.preventDefault();
+    if (!waitingJobModalJob) return;
+    setSavingWaitingJob(true);
+    try {
+      const now = new Date();
+      const trDate = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const trTime = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      const author = authUser?.name || currentUser?.name || 'Yönetici';
+      const cleanNote = waitingJobNote.trim() || 'Müşteriden haber / onay bekleniyor';
+      const waitingPrefix = `[${author} - ${trDate} ${trTime} ⏳ Haber Bekleniyor]: ${cleanNote}`;
+      const finalNotes = waitingJobModalJob.notes ? `${waitingPrefix}\n${waitingJobModalJob.notes}` : waitingPrefix;
+
+      await updateJob(waitingJobModalJob.id, {
+        status: 'haber_bekleniyor',
+        notes: finalNotes
+      });
+      setSuccessNotice(`"${waitingJobModalJob.title}" işi Haber Bekleniyor durumuna alındı.`);
+      setWaitingJobModalJob(null);
+      loadData();
+      if (onJobCreated) onJobCreated();
+      setTimeout(() => setSuccessNotice(''), 4000);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setSavingWaitingJob(false);
+    }
+  };
+
+  // 6. İş: İptal Et Kaydet
+  const handleSaveCancelJob = async (e) => {
+    e.preventDefault();
+    if (!cancelJobModalJob) return;
+    setSavingCancelJob(true);
+    try {
+      const now = new Date();
+      const trDate = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const trTime = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      const author = authUser?.name || currentUser?.name || 'Yönetici';
+      const cleanReason = cancelJobReason.trim() || 'İş iptal edildi';
+      const cancelPrefix = `[${author} - ${trDate} ${trTime} ❌ İptal]: ${cleanReason}`;
+      const finalNotes = cancelJobModalJob.notes ? `${cancelPrefix}\n${cancelJobModalJob.notes}` : cancelPrefix;
+
+      await updateJob(cancelJobModalJob.id, {
+        status: 'iptal_edildi',
+        notes: finalNotes,
+        cancel_reason: cleanReason,
+        lead_status: cancelJobAlsoNegativeLead ? 'olumsuz' : undefined,
+        user_name: author
+      });
+      setSuccessNotice(
+        cancelJobAlsoNegativeLead
+          ? `"${cancelJobModalJob.title}" işi iptal edildi ve müşteri işletme Olumsuz havuzuna aktarıldı.`
+          : `"${cancelJobModalJob.title}" işi iptal edildi.`
+      );
+      setCancelJobModalJob(null);
+      loadData();
+      if (onJobCreated) onJobCreated();
+      setTimeout(() => setSuccessNotice(''), 4000);
+    } catch (err) {
+      alert(`Hata: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setSavingCancelJob(false);
+    }
+  };
+
   // Mevcut bir işi düzenleme modalını aç
   const openEditJobModal = (job) => {
     let parsedProds = [];
@@ -448,9 +658,29 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
     return acc;
   }, {});
 
-  // Devam eden (aktif) işler ve tamamlanan işler ayrımı
-  const activeJobs = jobs.filter(j => j.status !== 'tamamlandi');
+  // Satış Havuzundaki işletmelerin dağılımı (Dağıtım Bekleyenler / Haber Beklenenler)
+  const pendingSalesLeads = salesLeads.filter(l => l.status === 'satis_havuzu');
+  const waitingNewsSalesLeads = salesLeads.filter(l => l.status === 'haber_bekleniyor');
+  const displayedSalesLeads = (() => {
+    if (salesPoolSubTab === 'satis_havuzu') return pendingSalesLeads;
+    if (salesPoolSubTab === 'haber_bekleniyor') return waitingNewsSalesLeads;
+    return salesLeads;
+  })();
+
+  // İşlerin durum bazlı ayrımı
+  const activeJobs = jobs.filter(j => j.status === 'devam_ediyor' || j.status === 'revizyonda');
+  const waitingJobs = jobs.filter(j => j.status === 'haber_bekleniyor');
   const completedJobs = jobs.filter(j => j.status === 'tamamlandi');
+  const cancelledJobs = jobs.filter(j => j.status === 'iptal_edildi');
+  const activeAndWaitingJobs = jobs.filter(j => j.status !== 'tamamlandi' && j.status !== 'iptal_edildi');
+
+  const displayedJobs = (() => {
+    if (jobsSubTab === 'active') return activeAndWaitingJobs;
+    if (jobsSubTab === 'haber_bekleniyor') return waitingJobs;
+    if (jobsSubTab === 'tamamlandi') return completedJobs;
+    if (jobsSubTab === 'iptal_edildi') return cancelledJobs;
+    return jobs;
+  })();
   const completedJobsCount = completedJobs.length;
 
   return (
@@ -495,91 +725,212 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
 
       {/* 1. KISIM: SATIŞ HAVUZUNDA DAĞITIM BEKLEYEN İŞLETMELER */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
               <Briefcase className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-extrabold text-base text-slate-900">
-                Dağıtım Bekleyen Satış Havuzu ({salesLeads.length})
+              <h2 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                <span>Satış Havuzu</span>
+                <span className="bg-purple-100 text-purple-800 text-xs font-black px-2 py-0.5 rounded-full">
+                  {salesLeads.length} İşletme
+                </span>
               </h2>
               <p className="text-xs text-slate-500">
-                Arama veya ziyaretten olumlu çıkan işletmelere bir veya birden fazla iş kategorisi atayınız
+                Arama veya ziyaretten olumlu çıkan işletmeler: Teklif/karar takibi yapın, işe dönüştürün veya olumsuza aktarın
               </p>
             </div>
           </div>
+
+          {/* Alt Sekmeler: Tümü / Dağıtım Bekleyenler / Haber Beklenenler */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setSalesPoolSubTab('all')}
+              className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                salesPoolSubTab === 'all'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Tümü</span>
+              <span className="text-[10px] bg-slate-200 text-slate-700 font-extrabold px-1.5 py-0.2 rounded-full">
+                {salesLeads.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSalesPoolSubTab('satis_havuzu')}
+              className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                salesPoolSubTab === 'satis_havuzu'
+                  ? 'bg-purple-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-purple-700'
+              }`}
+            >
+              <span>Dağıtım Bekleyen</span>
+              <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
+                salesPoolSubTab === 'satis_havuzu' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
+              }`}>
+                {pendingSalesLeads.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSalesPoolSubTab('haber_bekleniyor')}
+              className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                salesPoolSubTab === 'haber_bekleniyor'
+                  ? 'bg-amber-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-amber-700'
+              }`}
+            >
+              <span>⏳ Haber Beklenen</span>
+              <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
+                salesPoolSubTab === 'haber_bekleniyor' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {waitingNewsSalesLeads.length}
+              </span>
+            </button>
+          </div>
         </div>
 
-        {salesLeads.length === 0 ? (
+        {displayedSalesLeads.length === 0 ? (
           <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 text-slate-400 text-xs font-semibold">
-            Şu anda dağıtım bekleyen yeni satış bulunmuyor. Mevcut bir müşteriye ikinci bir iş eklemek için aşağıdaki tablodan <strong>"+ Ek İş Ekle"</strong> butonunu veya üstteki <strong>"İşletme Seç & Yeni İş Ekle"</strong> butonunu kullanabilirsiniz.
+            {salesPoolSubTab === 'haber_bekleniyor'
+              ? 'Şu anda haber beklenen işletme kaydı bulunmuyor.'
+              : salesPoolSubTab === 'satis_havuzu'
+              ? 'Şu anda dağıtım bekleyen taze satış bulunmuyor.'
+              : 'Şu anda satış havuzunda herhangi bir işletme bulunmuyor.'}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {salesLeads.map((lead) => (
-              <div 
-                key={lead.id}
-                className="bg-purple-50/40 border border-purple-200/80 rounded-2xl p-4 flex flex-col justify-between space-y-3"
-              >
-                <div>
-                  <div className="flex items-start justify-between">
-                    <h3 className="font-extrabold text-slate-900 text-sm">
-                      {lead.name}
-                    </h3>
-                    <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      Satış Onaylandı
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {lead.district} • {lead.phone}
-                  </p>
-                  {lead.call_notes && (
-                    <div className="mt-2 space-y-1.5 max-h-28 overflow-y-auto pr-1 scrollbar-thin">
-                      {lead.call_notes.split('\n').filter(Boolean).map((noteLine, idx) => {
-                        const parsed = parseCallNote(noteLine);
-                        return (
-                          <div key={idx} className="text-xs bg-white p-2 rounded-lg border border-purple-100 flex flex-col gap-0.5">
-                            <div className="flex items-center justify-between gap-1 flex-wrap">
-                              <span className="font-bold text-purple-800 text-[11px]">
-                                {parsed.author || 'Operatör'}
-                              </span>
-                              {(parsed.date || (isAdmin && parsed.time)) && (
-                                <div className="text-[10px] text-slate-500 flex items-center gap-1 bg-purple-50/60 px-1.5 py-0.5 rounded border border-purple-100">
-                                  {parsed.date && <span>📅 {parsed.date}</span>}
-                                  {isAdmin && parsed.time && (
-                                    <span className="text-purple-700 font-semibold ml-0.5 pl-1 border-l border-purple-200" title="Sadece Yöneticiler Görebilir">
-                                      ⏰ {parsed.time}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            <p className="text-slate-700 italic text-[11px]">
-                              "{parsed.content}"
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+            {displayedSalesLeads.map((lead) => {
+              const isWaitingNews = lead.status === 'haber_bekleniyor';
 
-                <button
-                  type="button"
-                  onClick={() => openDistributeModal(lead)}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-2.5 px-3 rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+              return (
+                <div 
+                  key={lead.id}
+                  className={`rounded-2xl p-4 flex flex-col justify-between space-y-3 transition-all ${
+                    isWaitingNews
+                      ? 'bg-amber-50/50 border-2 border-amber-300 shadow-2xs'
+                      : 'bg-purple-50/40 border border-purple-200/80'
+                  }`}
                 >
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>Kategori & Çalışana İş Dağıt (Tek / Çoklu)</span>
-                </button>
-              </div>
-            ))}
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="font-extrabold text-slate-900 text-sm">
+                        {lead.name}
+                      </h3>
+                      {isWaitingNews ? (
+                        <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
+                          <span>⏳ Haber Bekleniyor</span>
+                        </span>
+                      ) : (
+                        <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
+                          Satış Onaylandı
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-500">
+                      {lead.district} • {lead.phone}
+                    </p>
+
+                    {/* Karar / Haber Tarihi Varsa */}
+                    {isWaitingNews && lead.recall_date && (
+                      <div className="bg-amber-100/90 text-amber-950 border border-amber-300/80 rounded-xl px-2.5 py-1.5 text-xs font-black flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Karar / Takip:</span>
+                        </span>
+                        <span>{new Date(lead.recall_date).toLocaleDateString('tr-TR')}</span>
+                      </div>
+                    )}
+
+                    {lead.call_notes && (
+                      <div className="mt-2 space-y-1.5 max-h-28 overflow-y-auto pr-1 scrollbar-thin">
+                        {lead.call_notes.split('\n').filter(Boolean).map((noteLine, idx) => {
+                          const parsed = parseCallNote(noteLine);
+                          return (
+                            <div key={idx} className="text-xs bg-white p-2 rounded-lg border border-slate-200 flex flex-col gap-0.5">
+                              <div className="flex items-center justify-between gap-1 flex-wrap">
+                                <span className="font-bold text-slate-800 text-[11px]">
+                                  {parsed.author || 'Operatör'}
+                                </span>
+                                {(parsed.date || (isAdmin && parsed.time)) && (
+                                  <div className="text-[10px] text-slate-500 flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                                    {parsed.date && <span>📅 {parsed.date}</span>}
+                                    {isAdmin && parsed.time && (
+                                      <span className="text-purple-700 font-semibold ml-0.5 pl-1 border-l border-slate-200" title="Sadece Yöneticiler Görebilir">
+                                        ⏰ {parsed.time}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <p className="text-slate-700 italic text-[11px]">
+                                "{parsed.content}"
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Aksiyon Butonları */}
+                  <div className="space-y-2 pt-2 border-t border-slate-200/70">
+                    <button
+                      type="button"
+                      onClick={() => openDistributeModal(lead)}
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-2 px-3 rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span>{isWaitingNews ? '✓ Anlaşıldı & İşe Dağıt' : 'Kategori & Çalışana İş Dağıt'}</span>
+                    </button>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {isWaitingNews ? (
+                        <button
+                          type="button"
+                          onClick={() => openWaitingNewsModal(lead)}
+                          className="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-extrabold text-[11px] py-1.5 px-2 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer"
+                          title="Haber bekleme notunu ve tarihini güncelle"
+                        >
+                          <Clock className="w-3 h-3 text-amber-700" />
+                          <span>Notu Güncelle</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openWaitingNewsModal(lead)}
+                          className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-extrabold text-[11px] py-1.5 px-2 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer"
+                          title="Müşteriden haber / teklif onayı bekleniyor olarak işaretle"
+                        >
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          <span>Haber Bekleniyor</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => openNegativeModal(lead)}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-extrabold text-[11px] py-1.5 px-2 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer"
+                        title="Müşteri vazgeçti / olumsuz olduysa olumsuz havuzuna aktar veya sahaya pasla"
+                      >
+                        <XCircle className="w-3 h-3 text-rose-600" />
+                        <span>Olumsuza At</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* 2. KISIM: ALINAN VE DEVAM EDEN İŞLER (YALNIZCA AKTİF / DEVAM EDEN İŞLER GÖSTERİLİR) */}
+      {/* 2. KISIM: ALINAN VE DEVAM EDEN İŞLER */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         
         {/* Filtreleme Başlığı */}
@@ -587,15 +938,10 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
           <div>
             <h2 className="font-extrabold text-base text-slate-900 flex items-center gap-2 flex-wrap">
               <Layers className="w-4 h-4 text-blue-600" />
-              <span>Alınan ve Devam Eden İşler ({activeJobs.length} Aktif İş)</span>
-              {completedJobsCount > 0 && (
-                <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-black px-2.5 py-0.5 rounded-full">
-                  ✓ {completedJobsCount} Tamamlanan İş Altta Listeleniyor
-                </span>
-              )}
+              <span>İş Dağıtım Masası ({jobs.length} Toplam İş)</span>
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Aynı işletmeden alınan her hizmet ayrı birer iş satırı olarak takip edilir. "Tamamlandı" olarak işaretlenen işler alttaki Tamamlanan İşler bölümüne aktarılır.
+              İşletmelerden alınan her hizmet satırı burada takip edilir. Durumu haber bekleniyor veya iptal/olumsuz olarak değiştirebilirsiniz.
             </p>
           </div>
 
@@ -631,6 +977,94 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
           </div>
         </div>
 
+        {/* Tab Filtreleri: Aktif / Haber Beklenen / Tamamlanan / İptal / Tümü */}
+        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/40 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setJobsSubTab('active')}
+            className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              jobsSubTab === 'active'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <span>Aktif İşler</span>
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
+              jobsSubTab === 'active' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-800'
+            }`}>
+              {activeAndWaitingJobs.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setJobsSubTab('haber_bekleniyor')}
+            className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              jobsSubTab === 'haber_bekleniyor'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <span>⏳ Haber Beklenenler</span>
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
+              jobsSubTab === 'haber_bekleniyor' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+            }`}>
+              {waitingJobs.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setJobsSubTab('tamamlandi')}
+            className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              jobsSubTab === 'tamamlandi'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <span>✓ Tamamlananlar</span>
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
+              jobsSubTab === 'tamamlandi' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+            }`}>
+              {completedJobs.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setJobsSubTab('iptal_edildi')}
+            className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              jobsSubTab === 'iptal_edildi'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <span>❌ İptal / Olumsuz</span>
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
+              jobsSubTab === 'iptal_edildi' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'
+            }`}>
+              {cancelledJobs.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setJobsSubTab('all')}
+            className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              jobsSubTab === 'all'
+                ? 'bg-slate-800 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <span>Tümü</span>
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
+              jobsSubTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+            }`}>
+              {jobs.length}
+            </span>
+          </button>
+        </div>
+
         {/* İş Tablosu */}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -646,16 +1080,24 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/70 font-medium">
-              {activeJobs.length === 0 ? (
+              {displayedJobs.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-400">
-                    Seçili filtrelere uygun devam eden aktif iş bulunamadı.
+                    {jobsSubTab === 'haber_bekleniyor'
+                      ? 'Haber beklenen iş bulunmuyor.'
+                      : jobsSubTab === 'iptal_edildi'
+                      ? 'İptal edilen veya olumsuza alınan iş bulunmuyor.'
+                      : jobsSubTab === 'tamamlandi'
+                      ? 'Tamamlanmış iş bulunmuyor.'
+                      : 'Seçili filtrelere uygun iş kaydı bulunamadı.'}
                   </td>
                 </tr>
               ) : (
-                activeJobs.map((job) => {
+                displayedJobs.map((job) => {
                   const isCompleted = job.status === 'tamamlandi';
                   const isRevision = job.status === 'revizyonda';
+                  const isWaiting = job.status === 'haber_bekleniyor';
+                  const isCancelled = job.status === 'iptal_edildi';
                   
                   // Teslim tarihine kalan gün kontrolü
                   const due = new Date(job.due_date);
@@ -663,7 +1105,7 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
                   today.setHours(0, 0, 0, 0);
                   const diffTime = due.getTime() - today.getTime();
                   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                  const isOverdue = diffDays < 0 && !isCompleted;
+                  const isOverdue = diffDays < 0 && !isCompleted && !isCancelled;
 
                   let parsedProds = [];
                   try {
@@ -675,12 +1117,22 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
                   const totalJobsForThisLead = jobCountByLeadId[job.lead_id] || 1;
 
                   return (
-                    <tr key={job.id} className="hover:bg-slate-50 transition-colors">
+                    <tr key={job.id} className={`transition-colors ${isCancelled ? 'bg-rose-50/20' : isWaiting ? 'bg-amber-50/20' : 'hover:bg-slate-50'}`}>
                       
                       {/* İş Başlığı ve Alt Hizmet Rozetleri */}
                       <td className="p-3.5">
                         <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
                           <span>{job.title}</span>
+                          {isWaiting && (
+                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-1.5 py-0.2 rounded-full flex items-center gap-1">
+                              <span>⏳ Haber Bekleniyor</span>
+                            </span>
+                          )}
+                          {isCancelled && (
+                            <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[10px] font-black px-1.5 py-0.2 rounded-full flex items-center gap-1">
+                              <span>❌ İptal Edildi</span>
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => openEditJobModal(job)}
@@ -774,6 +1226,12 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
                           <div>
                             {isCompleted ? (
                               <span className="text-emerald-600 text-[10px] font-bold">Tamamlandı</span>
+                            ) : isCancelled ? (
+                              <span className="text-rose-600 text-[10px] font-bold">İptal Edildi</span>
+                            ) : isWaiting ? (
+                              <span className="text-amber-700 text-[10px] font-bold bg-amber-50 px-1.5 py-0.5 rounded-sm">
+                                Haber bekleniyor
+                              </span>
                             ) : isOverdue ? (
                               <span className="text-red-600 text-[10px] font-bold bg-red-50 px-1.5 py-0.5 rounded-sm">
                                 {Math.abs(diffDays)} gün gecikti!
@@ -795,18 +1253,24 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
                       <td className="p-3.5">
                         <select
                           value={job.status}
-                          onChange={(e) => handleUpdateStatus(job.id, e.target.value)}
+                          onChange={(e) => handleJobStatusChange(job, e.target.value)}
                           className={`text-xs font-bold px-2.5 py-1 rounded-lg border focus:outline-hidden cursor-pointer ${
                             isCompleted 
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                               : isRevision
                               ? 'bg-amber-50 text-amber-800 border-amber-300'
+                              : isWaiting
+                              ? 'bg-amber-100 text-amber-900 border-amber-400 font-black'
+                              : isCancelled
+                              ? 'bg-rose-50 text-rose-800 border-rose-300 font-bold'
                               : 'bg-blue-50 text-blue-800 border-blue-300'
                           }`}
                         >
                           <option value="devam_ediyor">Devam Ediyor</option>
                           <option value="revizyonda">Revizyonda</option>
-                          <option value="tamamlandi">Tamamlandı</option>
+                          <option value="haber_bekleniyor">⏳ Haber / Onay Bekleniyor</option>
+                          <option value="tamamlandi">✓ Tamamlandı</option>
+                          <option value="iptal_edildi">❌ İptal Edildi / Olumsuz</option>
                         </select>
                       </td>
 
@@ -1500,7 +1964,9 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
                   >
                     <option value="devam_ediyor">Devam Ediyor</option>
                     <option value="revizyonda">Revizyonda</option>
-                    <option value="tamamlandi">Tamamlandı</option>
+                    <option value="haber_bekleniyor">⏳ Haber / Onay Bekleniyor</option>
+                    <option value="tamamlandi">✓ Tamamlandı</option>
+                    <option value="iptal_edildi">❌ İptal Edildi / Olumsuz</option>
                   </select>
                 </div>
               </div>
@@ -1615,6 +2081,360 @@ export default function SalesPool({ currentUser, authUser, onJobCreated, onlyFin
                   className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black px-5 py-2.5 rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
                 >
                   {savingEdit ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 1. MODAL: SATIŞ HAVUZU - HABER BEKLENİYOR                                  */}
+      {/* ========================================================================= */}
+      {waitingNewsModalLead && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-black text-lg shrink-0">
+                  ⏳
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">
+                    Haber / Karar Bekleniyor
+                  </h3>
+                  <p className="text-xs text-slate-500 font-semibold truncate max-w-xs">
+                    {waitingNewsModalLead.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWaitingNewsModalLead(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveWaitingNews} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1">
+                  Karar / Haber Beklenen Tarih (Alarm):
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={waitingNewsDate}
+                  onChange={(e) => setWaitingNewsDate(e.target.value)}
+                  className="w-full text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 focus:bg-white"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Bu tarih geldiğinde sistem hatırlatma yapacak ve işletme takvimde öncelikli görünecektir.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1">
+                  Yönetici Görüşme / Bekleme Notu:
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Örn: Müşteriye teklif sunumu iletildi, Pazartesi günü ortaklarıyla bütçe toplantısı yapıp geri dönüş yapacak..."
+                  value={waitingNewsNote}
+                  onChange={(e) => setWaitingNewsNote(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl p-3 text-slate-900 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWaitingNewsModalLead(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingWaitingNews}
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-black px-5 py-2.5 rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{savingWaitingNews ? 'Kaydediliyor...' : 'Haber Beklemeye Al'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2. MODAL: SATIŞ HAVUZU - OLUMSUZA AL / SAHAYA PASLA                        */}
+      {/* ========================================================================= */}
+      {negativeModalLead && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-800 flex items-center justify-center font-black text-lg shrink-0">
+                  🔴
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">
+                    Satışı Olumsuza Al
+                  </h3>
+                  <p className="text-xs text-slate-500 font-semibold truncate max-w-xs">
+                    {negativeModalLead.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNegativeModalLead(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNegative} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1">
+                  Olumsuzluk Gerekçesi:
+                </label>
+                <select
+                  value={negativeReason}
+                  onChange={(e) => setNegativeReason(e.target.value)}
+                  className="w-full text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 cursor-pointer"
+                >
+                  <option value="Fiyat yüksek bulundu">Fiyat yüksek bulundu / Pazarlık sağlanamadı</option>
+                  <option value="Bütçe yetersiz / Karar ertelendi">Bütçe yetersiz / Karar ileri tarihe ertelendi</option>
+                  <option value="Başka firmayla anlaştı">Başka bir ajans / firmayla anlaştı</option>
+                  <option value="Teklifi onaylamadı / Vazgeçti">Teklif onaylanmadı / Projeden vazgeçti</option>
+                  <option value="İletişim koptu / Yanıt vermiyor">İletişim koptu / Geri dönüş alınamadı</option>
+                  <option value="Diğer">Diğer</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1">
+                  Yönetici Detay Notu:
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Müşterinin belirttiği özel durumlar ve notlar..."
+                  value={negativeNote}
+                  onChange={(e) => setNegativeNote(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl p-3 text-slate-900 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+
+              {/* Sahaya Pasla Checkbox */}
+              <div className="bg-purple-50/70 border border-purple-200 rounded-2xl p-3.5 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={negativePassToField}
+                    onChange={(e) => setNegativePassToField(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded border-purple-300 focus:ring-purple-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-black text-purple-900">
+                    🔁 Bu işletmeyi sahaya (yüz yüze ziyarete) pasla
+                  </span>
+                </label>
+                <p className="text-[11px] text-purple-700/80 pl-6 leading-relaxed">
+                  İşletme Satış Havuzundan çıkarılır ve saha personeline rotada ziyaret edilmesi için atanır.
+                </p>
+
+                {negativePassToField && (
+                  <div className="pl-6 pt-1">
+                    <label className="block text-[11px] font-bold text-purple-900 mb-1">
+                      Atanacak Saha Personeli:
+                    </label>
+                    <select
+                      value={negativeFieldMemberId}
+                      onChange={(e) => setNegativeFieldMemberId(e.target.value)}
+                      className="w-full text-xs font-bold bg-white border border-purple-300 rounded-xl px-3 py-2 text-purple-950 cursor-pointer"
+                    >
+                      {teamMembers
+                        .filter(m => isFieldStaffRole(m.role))
+                        .map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.role})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNegativeModalLead(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingNegative}
+                  className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-black px-5 py-2.5 rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>{savingNegative ? 'İşleniyor...' : (negativePassToField ? 'Sahaya Pasla' : 'Olumsuza Al')}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3. MODAL: İŞ MASASI - İŞ İÇİN HABER / ONAY BEKLENİYOR                       */}
+      {/* ========================================================================= */}
+      {waitingJobModalJob && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-black text-lg shrink-0">
+                  ⏳
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">
+                    İşi Beklemeye Al
+                  </h3>
+                  <p className="text-xs text-slate-500 font-semibold truncate max-w-xs">
+                    {waitingJobModalJob.title} — {waitingJobModalJob.lead_name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWaitingJobModalJob(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveWaitingJob} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1">
+                  Bekleme Konusu & Yönetici Notu:
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Örn: Müşteriden web sitesi ürün fotoğrafları ve kurumsal renk kodları bekleniyor, iş geçici olarak donduruldu..."
+                  value={waitingJobNote}
+                  onChange={(e) => setWaitingJobNote(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl p-3 text-slate-900 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWaitingJobModalJob(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingWaitingJob}
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-black px-5 py-2.5 rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{savingWaitingJob ? 'Kaydediliyor...' : 'Haber Bekleniyor Olarak Kaydet'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4. MODAL: İŞ MASASI - İŞİ İPTAL ET / OLUMSUZ                                */}
+      {/* ========================================================================= */}
+      {cancelJobModalJob && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-800 flex items-center justify-center font-black text-lg shrink-0">
+                  ❌
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">
+                    İşi İptal Et / Olumsuza Al
+                  </h3>
+                  <p className="text-xs text-slate-500 font-semibold truncate max-w-xs">
+                    {cancelJobModalJob.title} — {cancelJobModalJob.lead_name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancelJobModalJob(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCancelJob} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1">
+                  İptal Gerekçesi / Not:
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Örn: Müşteri projeden vazgeçti, bütçe onaylanmadı..."
+                  value={cancelJobReason}
+                  onChange={(e) => setCancelJobReason(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl p-3 text-slate-900 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+
+              {/* İşletmeyi de Olumsuza Al Checkbox */}
+              <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-3.5 space-y-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={cancelJobAlsoNegativeLead}
+                    onChange={(e) => setCancelJobAlsoNegativeLead(e.target.checked)}
+                    className="w-4 h-4 text-rose-600 rounded border-rose-300 focus:ring-rose-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-black text-rose-900">
+                    ⚠️ İşletmeyi de genel "Olumsuz" havuzuna aktar
+                  </span>
+                </label>
+                <p className="text-[11px] text-rose-700/80 pl-6 leading-relaxed">
+                  İşletmenin sistem durumu "olumsuz" olarak güncellenir ve arama/saha personelleri işletmenin olumsuz olduğunu görür.
+                </p>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCancelJobModalJob(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingCancelJob}
+                  className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-black px-5 py-2.5 rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>{savingCancelJob ? 'İptal Ediliyor...' : 'İşi İptal Et'}</span>
                 </button>
               </div>
             </form>
